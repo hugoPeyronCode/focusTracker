@@ -21,6 +21,8 @@ struct FocusActivityAttributes: ActivityAttributes {
     var todayFocusSeconds: Int
     var currentStreakLevel: Int
     var isRunning: Bool
+    var cycleEndTime: Date
+    var sessionStartTime: Date // When this focus session started
   }
   
   var startTime: Date
@@ -31,67 +33,51 @@ struct FocusActivityAttributes: ActivityAttributes {
 struct FocusTrackerWidgetLiveActivity: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: FocusActivityAttributes.self) { context in
-      // Lock Screen / Banner UI
       LockScreenView(context: context)
     } dynamicIsland: { context in
       DynamicIsland {
-        // Expanded UI
-        DynamicIslandExpandedRegion(.leading) {
-          HStack(spacing: 4) {
-            Text(context.state.activityEmoji)
-              .font(.title2)
-            Text(context.state.activityName)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-        
-        DynamicIslandExpandedRegion(.trailing) {
-          HStack(spacing: 4) {
-            Image(systemName: "flame.fill")
-              .foregroundStyle(.orange)
-              .font(.caption)
-            Text("\(context.state.currentStreakLevel)")
-              .font(.caption.bold())
-          }
-        }
-        
         DynamicIslandExpandedRegion(.center) {
           VStack(spacing: 4) {
-            Text("\(context.state.remainingSeconds)")
-              .font(.system(size: 36, weight: .ultraLight, design: .rounded))
-              .monospacedDigit()
+            // Activity
+            HStack(spacing: 6) {
+              Text(context.state.activityEmoji)
+                .font(.title2)
+              Text(context.state.activityName)
+                .font(.headline)
+            }
             
-            ProgressView(value: context.state.elapsed / context.state.cycleDuration)
-              .tint(.orange)
-          }
-        }
-        
-        DynamicIslandExpandedRegion(.bottom) {
-          HStack {
-            Label(formatTime(context.state.todayFocusSeconds), systemImage: "clock")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-            Spacer()
-            Text(context.state.isRunning ? "Focusing..." : "Paused")
-              .font(.caption2)
-              .foregroundStyle(context.state.isRunning ? .green : .orange)
+            // Time counting up
+            if context.state.isRunning {
+              Text(context.state.sessionStartTime, style: .timer)
+                .font(.system(size: 32, weight: .light, design: .monospaced))
+                .monospacedDigit()
+            } else {
+              Text(formatTime(context.state.todayFocusSeconds))
+                .font(.system(size: 32, weight: .light, design: .monospaced))
+                .foregroundStyle(.secondary)
+            }
           }
         }
       } compactLeading: {
-        HStack(spacing: 2) {
-          Text(context.state.activityEmoji)
-            .font(.caption)
-        }
+        Text(context.state.activityEmoji)
+          .font(.body)
       } compactTrailing: {
-        Text("\(context.state.remainingSeconds)s")
-          .font(.caption.monospacedDigit())
-          .foregroundStyle(context.state.isRunning ? .primary : .secondary)
+        if context.state.isRunning {
+          Text(context.state.sessionStartTime, style: .timer)
+            .font(.system(.caption, design: .monospaced))
+            .monospacedDigit()
+            .frame(minWidth: 44)
+        } else {
+          Text(formatTime(context.state.todayFocusSeconds))
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+        }
       } minimal: {
         Text(context.state.activityEmoji)
           .font(.caption)
       }
     }
+    .supplementalActivityFamilies([.small, .medium])
   }
   
   private func formatTime(_ seconds: Int) -> String {
@@ -101,7 +87,7 @@ struct FocusTrackerWidgetLiveActivity: Widget {
     if h > 0 {
       return String(format: "%d:%02d:%02d", h, m, s)
     }
-    return String(format: "%02d:%02d", m, s)
+    return String(format: "%d:%02d", m, s)
   }
 }
 
@@ -110,67 +96,99 @@ struct FocusTrackerWidgetLiveActivity: Widget {
 struct LockScreenView: View {
   let context: ActivityViewContext<FocusActivityAttributes>
   
+  @Environment(\.isLuminanceReduced) var isLuminanceReduced
+  @Environment(\.activityFamily) var activityFamily
+  
   var body: some View {
-    HStack(spacing: 16) {
-      // Left: Emoji and Activity
-      VStack(alignment: .leading, spacing: 4) {
+    switch activityFamily {
+    case .small:
+      standBySmallView
+    case .medium:
+      standByMediumView
+    @unknown default:
+      lockScreenDefaultView
+    }
+  }
+  
+  // MARK: - Lock Screen Default (Minimal)
+  
+  private var lockScreenDefaultView: some View {
+    HStack {
+      // Left: Activity
+      HStack(spacing: 8) {
         Text(context.state.activityEmoji)
-          .font(.largeTitle)
+          .font(.system(size: 28))
         Text(context.state.activityName)
-          .font(.caption)
+          .font(.system(size: 15, weight: .medium))
           .foregroundStyle(.secondary)
       }
       
       Spacer()
       
-      // Center: Timer
-      VStack(spacing: 4) {
-        Text("\(context.state.remainingSeconds)")
-          .font(.system(size: 44, weight: .ultraLight, design: .rounded))
+      // Right: Time (counting up from session start)
+      if context.state.isRunning {
+        Text(context.state.sessionStartTime, style: .timer)
+          .font(.system(size: 34, weight: .light, design: .monospaced))
           .monospacedDigit()
-        
-        Text("seconds")
-          .font(.caption2)
-          .textCase(.uppercase)
-          .foregroundStyle(.secondary)
-        
-        // Progress bar
-        GeometryReader { geo in
-          ZStack(alignment: .leading) {
-            Capsule()
-              .fill(Color.gray.opacity(0.3))
-              .frame(height: 4)
-            
-            Capsule()
-              .fill(Color.orange)
-              .frame(width: geo.size.width * (context.state.elapsed / context.state.cycleDuration), height: 4)
-          }
-        }
-        .frame(width: 80, height: 4)
-      }
-      
-      Spacer()
-      
-      // Right: Stats
-      VStack(alignment: .trailing, spacing: 4) {
-        HStack(spacing: 4) {
-          Image(systemName: "flame.fill")
-            .foregroundStyle(.orange)
-            .font(.caption)
-          Text("\(context.state.currentStreakLevel)")
-            .font(.caption.bold())
-        }
-        
+          .foregroundStyle(.primary)
+      } else {
         Text(formatTime(context.state.todayFocusSeconds))
-          .font(.caption2)
+          .font(.system(size: 34, weight: .light, design: .monospaced))
           .foregroundStyle(.secondary)
-        
-        Circle()
-          .fill(context.state.isRunning ? Color.green : Color.orange)
-          .frame(width: 8, height: 8)
       }
     }
-    .padding()
+    .padding(.horizontal, 20)
+    .padding(.vertical, 14)
+  }
+  
+  // MARK: - StandBy Small
+  
+  private var standBySmallView: some View {
+    VStack(spacing: 8) {
+      Text(context.state.activityEmoji)
+        .font(.system(size: 36))
+      
+      if context.state.isRunning {
+        Text(context.state.sessionStartTime, style: .timer)
+          .font(.system(size: 28, weight: .light, design: .monospaced))
+          .monospacedDigit()
+      } else {
+        Text(formatTime(context.state.todayFocusSeconds))
+          .font(.system(size: 28, weight: .light, design: .monospaced))
+          .foregroundStyle(.secondary)
+      }
+      
+      Text(context.state.activityName)
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(.secondary)
+    }
+    .padding(16)
+  }
+  
+  // MARK: - StandBy Medium
+  
+  private var standByMediumView: some View {
+    HStack(spacing: 24) {
+      Text(context.state.activityEmoji)
+        .font(.system(size: 64))
+      
+      VStack(alignment: .leading, spacing: 4) {
+        if context.state.isRunning {
+          Text(context.state.sessionStartTime, style: .timer)
+            .font(.system(size: 56, weight: .ultraLight, design: .monospaced))
+            .monospacedDigit()
+        } else {
+          Text(formatTime(context.state.todayFocusSeconds))
+            .font(.system(size: 56, weight: .ultraLight, design: .monospaced))
+            .foregroundStyle(.secondary)
+        }
+        
+        Text(context.state.activityName)
+          .font(.system(size: 18, weight: .medium))
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(32)
   }
   
   private func formatTime(_ seconds: Int) -> String {
@@ -180,6 +198,6 @@ struct LockScreenView: View {
     if h > 0 {
       return String(format: "%d:%02d:%02d", h, m, s)
     }
-    return String(format: "%02d:%02d", m, s)
+    return String(format: "%d:%02d", m, s)
   }
 }

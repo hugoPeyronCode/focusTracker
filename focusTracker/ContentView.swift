@@ -23,6 +23,8 @@ struct FocusActivityAttributes: ActivityAttributes {
     var todayFocusSeconds: Int
     var currentStreakLevel: Int
     var isRunning: Bool
+    var cycleEndTime: Date
+    var sessionStartTime: Date // When this focus session started (for counting up)
   }
   
   var startTime: Date
@@ -449,11 +451,9 @@ final class FocusViewModel {
   var isRunning = false
   var elapsed: Double = 0
   var totalCollected: Int = 0
-  var todayFocusSeconds: Int = 0
   var showActivityPicker = false
   var showSettings = false
   var showStats = false
-  var showResetAlert = false
   var isCreatingActivity = false
   var isEditingActivity = false
   var editingActivity: FocusActivityModel?
@@ -463,6 +463,10 @@ final class FocusViewModel {
   var lastRemainingSeconds: Int = 30
   var cycleCompleted = false
   var pendingCoinsNoAnimation: Int = 0
+  var sessionStartTime: Date = Date()
+  
+  // Track time per activity (by activity name)
+  var activitySeconds: [String: Int] = [:]
   
   let physics = PhysicsEngine()
   let cycleDuration: Double = 30
@@ -478,6 +482,17 @@ final class FocusViewModel {
   }
   var canCollect: Bool { pendingCount > 0 }
   
+  // Current activity's time in seconds
+  var currentActivitySeconds: Int {
+    guard let activity = selectedActivity else { return 0 }
+    return activitySeconds[activity.name] ?? 0
+  }
+  
+  // Total time across all activities today
+  var todayFocusSeconds: Int {
+    activitySeconds.values.reduce(0, +)
+  }
+  
   var streakProgress: Double {
     min(Double(todayFocusSeconds) / Double(streakThreshold), 1.0)
   }
@@ -491,12 +506,26 @@ final class FocusViewModel {
     return todayFocusSeconds >= streakThreshold && todayFocusSeconds % streakThreshold == 0 ? 0 : remaining
   }
   
+  var formattedSessionTime: String {
+    let seconds = currentActivitySeconds
+    let h = seconds / 3600
+    let m = (seconds % 3600) / 60
+    let s = seconds % 60
+    if h > 0 {
+      return String(format: "%d:%02d:%02d", h, m, s)
+    }
+    return String(format: "%d:%02d", m, s)
+  }
+  
   func toggle() {
     isRunning ? pause() : start()
   }
   
   func start() {
     isRunning = true
+    // Set session start time to reflect already accumulated time for this activity
+    let currentSeconds = selectedActivity.map { activitySeconds[$0.name] ?? 0 } ?? 0
+    sessionStartTime = Date().addingTimeInterval(-Double(currentSeconds))
     physics.start()
     timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
       self?.tick()
@@ -521,6 +550,10 @@ final class FocusViewModel {
   
   // MARK: - Live Activity
   
+  private var cycleEndTime: Date {
+    Date().addingTimeInterval(Double(remainingSeconds))
+  }
+  
   private func startLiveActivity() {
     guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
     
@@ -533,7 +566,9 @@ final class FocusViewModel {
       activityName: selectedActivity?.name ?? "Focus",
       todayFocusSeconds: todayFocusSeconds,
       currentStreakLevel: currentStreakLevel,
-      isRunning: isRunning
+      isRunning: isRunning,
+      cycleEndTime: cycleEndTime,
+      sessionStartTime: sessionStartTime
     )
     
     do {
@@ -559,7 +594,9 @@ final class FocusViewModel {
       activityName: selectedActivity?.name ?? "Focus",
       todayFocusSeconds: todayFocusSeconds,
       currentStreakLevel: currentStreakLevel,
-      isRunning: isRunning
+      isRunning: isRunning,
+      cycleEndTime: cycleEndTime,
+      sessionStartTime: sessionStartTime
     )
     
     Task {
@@ -578,13 +615,22 @@ final class FocusViewModel {
       activityName: selectedActivity?.name ?? "Focus",
       todayFocusSeconds: todayFocusSeconds,
       currentStreakLevel: currentStreakLevel,
-      isRunning: false
+      isRunning: false,
+      cycleEndTime: cycleEndTime,
+      sessionStartTime: sessionStartTime
     )
     
     Task {
       await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .immediate)
     }
     currentLiveActivity = nil
+  }
+  
+  func refreshLiveActivity() {
+    // Called when app becomes active - update the Live Activity with current state
+    if currentLiveActivity != nil {
+      updateLiveActivity()
+    }
   }
   
   func collect(modelContext: ModelContext) {
@@ -618,7 +664,10 @@ final class FocusViewModel {
     
     if tickCounter >= 10 {
       tickCounter = 0
-      todayFocusSeconds += 1
+      // Increment current activity's time
+      if let activity = selectedActivity {
+        activitySeconds[activity.name, default: 0] += 1
+      }
       updateLiveActivity()
     }
     
@@ -644,11 +693,14 @@ final class FocusViewModel {
   }
   
   func selectActivity(_ activity: FocusActivityModel) {
+    // Update session start time for Live Activity when switching activities
+    sessionStartTime = Date().addingTimeInterval(-Double(activitySeconds[activity.name] ?? 0))
     selectedActivity = activity
     isCreatingActivity = false
     isEditingActivity = false
     editingActivity = nil
     showActivityPicker = false
+    updateLiveActivity()
   }
   
   func startCreatingActivity() {
@@ -708,11 +760,16 @@ final class FocusViewModel {
   func loadTotalCollected(sessions: [FocusSession]) {
     totalCollected = sessions.reduce(0) { $0 + $1.collectedCount }
     
+    // Load today's activity times into the dictionary
     let calendar = Calendar.current
     let today = calendar.startOfDay(for: Date())
-    todayFocusSeconds = sessions
-      .filter { calendar.isDate($0.date, inSameDayAs: today) }
-      .reduce(0) { $0 + $1.durationSeconds }
+    let todaySessions = sessions.filter { calendar.isDate($0.date, inSameDayAs: today) }
+    
+    // Group by activity name and sum durations
+    activitySeconds = [:]
+    for session in todaySessions {
+      activitySeconds[session.activityName, default: 0] += session.durationSeconds
+    }
   }
   
   func initializeDefaultActivities(existing: [FocusActivityModel], modelContext: ModelContext) {
@@ -1755,6 +1812,7 @@ struct CoinsCollectionView: View {
 struct FocusTrackerView: View {
   @Environment(\.modelContext) private var modelContext
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  @Environment(\.scenePhase) private var scenePhase
   @Query private var activities: [FocusActivityModel]
   @Query private var sessions: [FocusSession]
   @State private var viewModel = FocusViewModel()
@@ -1780,11 +1838,15 @@ struct FocusTrackerView: View {
       .onChange(of: geo.size) { _, _ in
         updatePhysicsBounds(geo: geo)
       }
+      .onChange(of: scenePhase) { _, newPhase in
+        if newPhase == .active {
+          viewModel.refreshLiveActivity()
+        }
+      }
     }
     .sheet(isPresented: $viewModel.showActivityPicker) { activityPickerSheet }
     .sheet(isPresented: $viewModel.showSettings) { SettingsView() }
     .fullScreenCover(isPresented: $viewModel.showStats) { StatsView(sessions: sessions) }
-    .alert("Reset Session?", isPresented: $viewModel.showResetAlert) { resetAlertButtons }
     .sensoryFeedback(.selection, trigger: viewModel.remainingSeconds, condition: { _, _ in settings.timerHapticsEnabled })
     .sensoryFeedback(.success, trigger: viewModel.cycleCompleted, condition: { _, _ in settings.timerHapticsEnabled })
     .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.totalCollected, condition: { _, _ in settings.hapticsEnabled })
@@ -1907,17 +1969,6 @@ struct FocusTrackerView: View {
   
   private var landscapeControlButtons: some View {
     VStack(spacing: 12) {
-      Button { viewModel.showResetAlert = true } label: {
-        Image(systemName: "arrow.counterclockwise")
-          .font(.body)
-          .foregroundStyle(viewModel.isRunning ? .primary : .secondary)
-          .frame(width: 44, height: 44)
-          .background(viewModel.isRunning ? FocusTheme.cardBackground : FocusTheme.cardBackground.opacity(0.5))
-          .clipShape(Circle())
-      }
-      .buttonStyle(.plain)
-      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.showResetAlert, condition: { _, _ in settings.hapticsEnabled })
-      
       Button { viewModel.toggle() } label: {
         Image(systemName: viewModel.isRunning ? "pause.fill" : "play.fill")
           .font(.title3)
@@ -2021,6 +2072,11 @@ struct FocusTrackerView: View {
     let activeThickness = baseThickness + 2
     let timerSize: CGFloat = isLandscape ? min(size.height * 0.75, size.width * 0.5, 280) : min(size.width * 0.6, 240)
     
+    // Calculate font size based on text length and circle size
+    let timeText = viewModel.formattedSessionTime
+    let baseFontSize = timerSize * 0.22
+    let fontSize: CGFloat = timeText.count > 5 ? baseFontSize * 0.8 : baseFontSize
+    
     return ZStack {
       CircularProgressView(
         progress: viewModel.progress,
@@ -2034,14 +2090,14 @@ struct FocusTrackerView: View {
           .font(.system(size: timerSize * 0.2))
           .opacity(viewModel.isRunning ? 1 : 0.6)
         
-        Text("\(viewModel.remainingSeconds)")
-          .font(.system(size: timerSize * 0.25, weight: .ultraLight, design: settings.appFont.design))
+        Text(timeText)
+          .font(.system(size: fontSize, weight: .ultraLight, design: settings.appFont.design))
           .monospacedDigit()
           .foregroundStyle(.primary)
           .contentTransition(.numericText())
-          .animation(.spring(response: 0.3), value: viewModel.remainingSeconds)
+          .animation(.spring(response: 0.3), value: viewModel.todayFocusSeconds)
         
-        Text("seconds")
+        Text("today")
           .font(.system(size: 10, design: settings.appFont.design))
           .textCase(.uppercase)
           .tracking(2)
@@ -2071,31 +2127,18 @@ struct FocusTrackerView: View {
   }
   
   private var controlButtons: some View {
-    HStack(spacing: 16) {
-      Button { viewModel.showResetAlert = true } label: {
-        Image(systemName: "arrow.counterclockwise")
-          .font(.title3)
-          .foregroundStyle(viewModel.isRunning ? .primary : .secondary)
-          .frame(width: 50, height: 50)
-          .background(viewModel.isRunning ? FocusTheme.cardBackground : FocusTheme.cardBackground.opacity(0.5))
-          .clipShape(Circle())
-      }
-      .buttonStyle(.plain)
-      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.showResetAlert, condition: { _, _ in settings.hapticsEnabled })
-      
-      Button { viewModel.toggle() } label: {
-        Text(viewModel.isRunning ? "Pause" : "Start")
-          .font(.system(size: 17, weight: .semibold, design: settings.appFont.design))
-          .foregroundStyle(.white)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 18)
-          .background(settings.accent)
-          .clipShape(Capsule())
-          .shadow(color: viewModel.isRunning ? settings.accent.opacity(0.4) : .clear, radius: 12, y: 4)
-      }
-      .buttonStyle(.plain)
-      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.isRunning, condition: { _, _ in settings.hapticsEnabled })
+    Button { viewModel.toggle() } label: {
+      Text(viewModel.isRunning ? "Pause" : "Start")
+        .font(.system(size: 17, weight: .semibold, design: settings.appFont.design))
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .background(settings.accent)
+        .clipShape(Capsule())
+        .shadow(color: viewModel.isRunning ? settings.accent.opacity(0.4) : .clear, radius: 12, y: 4)
     }
+    .buttonStyle(.plain)
+    .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.isRunning, condition: { _, _ in settings.hapticsEnabled })
     .padding(.bottom, 16)
   }
   
@@ -2225,12 +2268,6 @@ struct FocusTrackerView: View {
     }
   }
   
-  @ViewBuilder
-  private var resetAlertButtons: some View {
-    Button("Cancel", role: .cancel) { }
-    Button("Reset", role: .destructive) { viewModel.reset() }
-  }
-  
   private func onAppear(geo: GeometryProxy) {
     updatePhysicsBounds(geo: geo)
     viewModel.initializeDefaultActivities(existing: activities, modelContext: modelContext)
@@ -2251,4 +2288,3 @@ struct FocusTrackerView: View {
     viewModel.physics.configure(bounds: bounds)
   }
 }
-
