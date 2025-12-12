@@ -6,12 +6,14 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
-struct focusTrackerApp: App {
+struct FocusTrackerApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            FocusTrackerView()
         }
+        .modelContainer(for: [Activity.self, FocusSession.self])
     }
 }
