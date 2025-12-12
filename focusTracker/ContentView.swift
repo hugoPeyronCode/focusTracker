@@ -92,9 +92,7 @@ struct PhysicsEmoji: Identifiable {
 final class PhysicsEngine {
   var emojis: [PhysicsEmoji] = []
   private var displayLink: CADisplayLink?
-  private var groundY: CGFloat = 0
-  private var screenWidth: CGFloat = 0
-  private var screenHeight: CGFloat = 0
+  private var bounds: CGRect = .zero
   
   private let baseGravity: CGFloat = 1200
   private let restitution: CGFloat = 0.65
@@ -109,17 +107,15 @@ final class PhysicsEngine {
   
   private let motionManager = CMMotionManager()
   
-  func configure(screenWidth: CGFloat, groundY: CGFloat) {
-    self.screenWidth = screenWidth
-    self.screenHeight = groundY + 100
-    self.groundY = groundY
+  func configure(bounds: CGRect) {
+    self.bounds = bounds
   }
   
   func spawn(emoji: String) {
     let newEmoji = PhysicsEmoji(
       emoji: emoji,
-      x: screenWidth / 2 + CGFloat.random(in: -30...30),
-      y: -50,
+      x: bounds.width / 2 + CGFloat.random(in: -30...30),
+      y: bounds.minY - 50,
       vx: CGFloat.random(in: -50...50),
       vy: CGFloat.random(in: 0...100),
       rotation: 0,
@@ -151,19 +147,43 @@ final class PhysicsEngine {
   private func startMotionUpdates() {
     guard motionManager.isDeviceMotionAvailable else { return }
     motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
-    motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
+    motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] motion, _ in
       guard let motion = motion, let self = self else { return }
-      self.gravityX = CGFloat(motion.gravity.x)
-      self.gravityY = CGFloat(-motion.gravity.y)
+      
+      let orientation = UIDevice.current.orientation
+      var gx = CGFloat(motion.gravity.x)
+      var gy = CGFloat(-motion.gravity.y)
+      
+      switch orientation {
+      case .landscapeLeft:
+        gx = CGFloat(-motion.gravity.y)
+        gy = CGFloat(-motion.gravity.x)
+      case .landscapeRight:
+        gx = CGFloat(motion.gravity.y)
+        gy = CGFloat(motion.gravity.x)
+      case .portraitUpsideDown:
+        gx = CGFloat(-motion.gravity.x)
+        gy = CGFloat(motion.gravity.y)
+      default:
+        break
+      }
+      
+      self.gravityX = gx
+      self.gravityY = gy
     }
   }
   
   @objc private func update(link: CADisplayLink) {
     let dt = min(CGFloat(link.targetTimestamp - link.timestamp), 0.032)
-    guard dt > 0 else { return }
+    guard dt > 0, bounds.width > 0 else { return }
     
     let gx = gravityX * baseGravity
     let gy = gravityY * baseGravity
+    
+    let minX = bounds.minX + emojiRadius
+    let maxX = bounds.maxX - emojiRadius
+    let minY = bounds.minY + emojiRadius
+    let maxY = bounds.maxY - emojiRadius
     
     for i in emojis.indices {
       if emojis[i].isResting {
@@ -189,22 +209,22 @@ final class PhysicsEngine {
       emojis[i].rotation += emojis[i].rotationVelocity * Double(dt)
       emojis[i].rotationVelocity *= 0.98
       
-      if emojis[i].x - emojiRadius < 0 {
-        emojis[i].x = emojiRadius
+      if emojis[i].x < minX {
+        emojis[i].x = minX
         emojis[i].vx = abs(emojis[i].vx) * restitution
         emojis[i].rotationVelocity *= -0.5
       }
-      if emojis[i].x + emojiRadius > screenWidth {
-        emojis[i].x = screenWidth - emojiRadius
+      if emojis[i].x > maxX {
+        emojis[i].x = maxX
         emojis[i].vx = -abs(emojis[i].vx) * restitution
         emojis[i].rotationVelocity *= -0.5
       }
-      if emojis[i].y - emojiRadius < 0 {
-        emojis[i].y = emojiRadius
+      if emojis[i].y < minY {
+        emojis[i].y = minY
         emojis[i].vy = abs(emojis[i].vy) * restitution
       }
-      if emojis[i].y + emojiRadius > groundY {
-        emojis[i].y = groundY - emojiRadius
+      if emojis[i].y > maxY {
+        emojis[i].y = maxY
         if emojis[i].vy > 0 {
           emojis[i].vy = -emojis[i].vy * restitution
           emojis[i].vx *= (1 - friction)
@@ -270,16 +290,15 @@ final class PhysicsEngine {
       guard !emojis[i].isResting else { continue }
       
       let speed = sqrt(emojis[i].vx * emojis[i].vx + emojis[i].vy * emojis[i].vy)
-      let onGround = emojis[i].y + emojiRadius >= groundY - 1
+      let nearEdge = emojis[i].y >= maxY - 1 || emojis[i].x <= minX + 1 || emojis[i].x >= maxX - 1
       
-      if speed < restVelocityThreshold && onGround && abs(gravityX) < 0.1 {
+      if speed < restVelocityThreshold && nearEdge && abs(gravityX) < 0.1 && abs(gravityY - 1) < 0.1 {
         emojis[i].restFrames += 1
         if emojis[i].restFrames >= restFramesRequired {
           emojis[i].isResting = true
           emojis[i].vx = 0
           emojis[i].vy = 0
           emojis[i].rotationVelocity = 0
-          emojis[i].y = groundY - emojiRadius
         }
       } else {
         emojis[i].restFrames = max(0, emojis[i].restFrames - 2)
@@ -467,15 +486,33 @@ struct UIKitTextField: UIViewRepresentable {
 struct CircularProgressView: View {
   let progress: Double
   let lineWidth: CGFloat
+  let isActive: Bool
   
   var body: some View {
     ZStack {
-      Circle().stroke(FocusTheme.subtle, lineWidth: lineWidth)
+      Circle()
+        .stroke(FocusTheme.subtle.opacity(isActive ? 0.3 : 1), lineWidth: lineWidth)
+      
       Circle()
         .trim(from: 0, to: progress)
-        .stroke(FocusTheme.warmBrown, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+        .stroke(
+          FocusTheme.warmBrown,
+          style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+        )
         .rotationEffect(.degrees(-90))
         .animation(.linear(duration: 0.1), value: progress)
+      
+      if isActive {
+        Circle()
+          .trim(from: 0, to: progress)
+          .stroke(
+            FocusTheme.warmBrown.opacity(0.4),
+            style: StrokeStyle(lineWidth: lineWidth + 8, lineCap: .round)
+          )
+          .rotationEffect(.degrees(-90))
+          .blur(radius: 8)
+          .animation(.linear(duration: 0.1), value: progress)
+      }
     }
   }
 }
@@ -485,12 +522,17 @@ struct StatCard: View {
   let label: String
   var isClickable: Bool = false
   var action: (() -> Void)? = nil
+  @State private var tapped = false
   
   var body: some View {
     Group {
       if isClickable, let action = action {
-        Button(action: action) { cardContent }
+        Button {
+          tapped.toggle()
+          action()
+        } label: { cardContent }
           .buttonStyle(.plain)
+          .sensoryFeedback(.impact(weight: .light), trigger: tapped)
       } else {
         cardContent
       }
@@ -527,9 +569,13 @@ struct ActivityButton: View {
   let name: String
   let isSelected: Bool
   let action: () -> Void
+  @State private var tapped = false
   
   var body: some View {
-    Button(action: action) {
+    Button {
+      tapped.toggle()
+      action()
+    } label: {
       VStack(spacing: 8) {
         Text(emoji).font(.largeTitle)
         Text(name).font(.caption).foregroundStyle(.primary)
@@ -541,11 +587,13 @@ struct ActivityButton: View {
       .overlay(RoundedRectangle(cornerRadius: 16).stroke(isSelected ? FocusTheme.warmBrown : Color.clear, lineWidth: 2))
     }
     .buttonStyle(.plain)
+    .sensoryFeedback(.impact(weight: .light), trigger: tapped)
   }
 }
 
 struct EmojiPickerView: View {
   @Binding var selected: String
+  @State private var tapped = false
   let emojis = ["🎯", "🧘", "💼", "💻", "💪", "⚽", "📚", "✍️", "🎵", "🎨",
                 "🏃", "🚴", "🏊", "🧗", "🎮", "🎬", "📷", "🔬", "🧪", "🌱",
                 "☕", "🍳", "🧹", "💤", "🙏", "💡", "🎓", "📝", "🗣️", "🤝",
@@ -555,7 +603,10 @@ struct EmojiPickerView: View {
   var body: some View {
     LazyVGrid(columns: columns, spacing: 8) {
       ForEach(emojis, id: \.self) { emoji in
-        Button { selected = emoji } label: {
+        Button {
+          tapped.toggle()
+          selected = emoji
+        } label: {
           Text(emoji)
             .font(.title2)
             .frame(width: 44, height: 44)
@@ -565,6 +616,7 @@ struct EmojiPickerView: View {
         .buttonStyle(.plain)
       }
     }
+    .sensoryFeedback(.impact(weight: .light), trigger: tapped)
   }
 }
 
@@ -613,18 +665,31 @@ struct PhysicsEmojisView: View {
 
 struct FocusTrackerView: View {
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Query private var activities: [Activity]
   @Query private var sessions: [FocusSession]
   @State private var viewModel = FocusViewModel()
+  
+  var isLandscape: Bool {
+    horizontalSizeClass == .regular || UIScreen.main.bounds.width > UIScreen.main.bounds.height
+  }
   
   var body: some View {
     GeometryReader { geo in
       ZStack {
         background
         physicsLayer(in: geo)
-        mainContent
+        
+        if isLandscape {
+          landscapeContent(in: geo)
+        } else {
+          portraitContent(in: geo)
+        }
       }
-      .onAppear { onAppear(screenSize: geo.size) }
+      .onAppear { onAppear(geo: geo) }
+      .onChange(of: geo.size) { _, _ in
+        updatePhysicsBounds(geo: geo)
+      }
     }
     .sheet(isPresented: $viewModel.showActivityPicker) { activityPickerSheet }
     .alert("Reset Session?", isPresented: $viewModel.showResetAlert) { resetAlertButtons }
@@ -637,17 +702,142 @@ struct FocusTrackerView: View {
     FocusTheme.beige.ignoresSafeArea()
   }
   
-  private var mainContent: some View {
+  private func portraitContent(in geo: GeometryProxy) -> some View {
     VStack(spacing: 0) {
       topBar
-      activitySelector
+      
+      if !viewModel.isRunning {
+        activitySelector
+          .transition(.opacity.combined(with: .scale(scale: 0.95)))
+      }
+      
       Spacer()
-      timerSection
+      
+      timerSection(size: geo.size)
+      
       Spacer()
-      statsRow
+      
+      if !viewModel.isRunning {
+        statsRow
+          .transition(.opacity.combined(with: .scale(scale: 0.95)))
+      }
+      
       controlButtons
     }
     .padding()
+    .animation(.easeInOut(duration: 0.3), value: viewModel.isRunning)
+  }
+  
+  private func landscapeContent(in geo: GeometryProxy) -> some View {
+    VStack(spacing: 0) {
+      topBar
+        .padding(.horizontal)
+        .padding(.top, 8)
+      
+      HStack(spacing: 16) {
+        VStack {
+          Spacer()
+          
+          timerSection(size: geo.size)
+          
+          Spacer()
+          
+          if !viewModel.isRunning {
+            activitySelector
+              .transition(.opacity.combined(with: .scale(scale: 0.95)))
+              .padding(.bottom, 8)
+          }
+        }
+        .frame(maxWidth: .infinity)
+        
+        VStack(spacing: 12) {
+          Spacer()
+          
+          if !viewModel.isRunning {
+            compactStatCard(value: viewModel.totalCollected, label: "Collected")
+              .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            
+            compactStatCard(value: viewModel.pendingCount, label: "Pending", isClickable: true) {
+              if viewModel.canCollect {
+                viewModel.collect(modelContext: modelContext)
+              }
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            
+            Spacer()
+          }
+          
+          landscapeControlButtons
+        }
+        .frame(width: 70)
+        .padding(.trailing, 8)
+      }
+    }
+    .padding(.horizontal, 8)
+    .padding(.bottom, 8)
+    .animation(.easeInOut(duration: 0.3), value: viewModel.isRunning)
+  }
+  
+  private func compactStatCard(value: Int, label: String, isClickable: Bool = false, action: (() -> Void)? = nil) -> some View {
+    let content = VStack(spacing: 2) {
+      Text("\(value)")
+        .font(.title3)
+        .fontWeight(.semibold)
+        .foregroundStyle(.primary)
+        .contentTransition(.numericText())
+        .animation(.spring(response: 0.3), value: value)
+      Text(label)
+        .font(.system(size: 8))
+        .textCase(.uppercase)
+        .tracking(0.5)
+        .foregroundStyle(.secondary)
+    }
+    .frame(width: 60)
+    .padding(.vertical, 10)
+    .background(isClickable && value > 0 ? FocusTheme.accent.opacity(0.2) : FocusTheme.cardBackground)
+    .clipShape(RoundedRectangle(cornerRadius: 12))
+    .overlay(
+      RoundedRectangle(cornerRadius: 12)
+        .stroke(isClickable && value > 0 ? FocusTheme.warmBrown : Color.clear, lineWidth: 1.5)
+    )
+    
+    if isClickable, let action = action {
+      return AnyView(
+        Button(action: action) { content }
+          .buttonStyle(.plain)
+          .sensoryFeedback(.impact(weight: .light), trigger: value)
+      )
+    } else {
+      return AnyView(content)
+    }
+  }
+  
+  private var landscapeControlButtons: some View {
+    VStack(spacing: 12) {
+      Button { viewModel.showResetAlert = true } label: {
+        Image(systemName: "arrow.counterclockwise")
+          .font(.body)
+          .foregroundStyle(viewModel.isRunning ? .primary : .secondary)
+          .frame(width: 44, height: 44)
+          .background(viewModel.isRunning ? FocusTheme.cardBackground : FocusTheme.cardBackground.opacity(0.5))
+          .clipShape(Circle())
+      }
+      .buttonStyle(.plain)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.showResetAlert)
+      
+      Button { viewModel.toggle() } label: {
+        Image(systemName: viewModel.isRunning ? "pause.fill" : "play.fill")
+          .font(.title3)
+          .foregroundStyle(.white)
+          .frame(width: 56, height: 56)
+          .background(FocusTheme.warmBrown)
+          .clipShape(Circle())
+          .shadow(color: viewModel.isRunning ? FocusTheme.warmBrown.opacity(0.4) : .clear, radius: 8, y: 2)
+      }
+      .buttonStyle(.plain)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.isRunning)
+    }
+    .padding(.bottom, 8)
   }
   
   private var topBar: some View {
@@ -664,10 +854,12 @@ struct FocusTrackerView: View {
           .contentTransition(.numericText())
           .animation(.spring(response: 0.3), value: viewModel.todayFocusSeconds)
       }
+      .opacity(viewModel.isRunning ? 0.5 : 1)
       
       Spacer()
       
       collectButton
+        .opacity(viewModel.isRunning && !viewModel.canCollect ? 0.5 : 1)
     }
     .padding(.bottom, 8)
   }
@@ -702,6 +894,7 @@ struct FocusTrackerView: View {
     }
     .buttonStyle(.plain)
     .animation(.spring(response: 0.3), value: viewModel.canCollect)
+    .sensoryFeedback(.impact(weight: .light), trigger: viewModel.totalCollected)
   }
   
   private var activitySelector: some View {
@@ -718,29 +911,38 @@ struct FocusTrackerView: View {
     }
     .buttonStyle(.plain)
     .padding(.top, 8)
+    .sensoryFeedback(.impact(weight: .light), trigger: viewModel.showActivityPicker)
   }
   
-  private var timerSection: some View {
-    ZStack {
-      CircularProgressView(progress: viewModel.progress, lineWidth: 6)
-        .frame(width: 240, height: 240)
+  private func timerSection(size: CGSize) -> some View {
+    let timerSize: CGFloat = isLandscape ? min(size.height * 0.75, size.width * 0.5, 280) : min(size.width * 0.6, 240)
+    
+    return ZStack {
+      CircularProgressView(progress: viewModel.progress, lineWidth: viewModel.isRunning ? 8 : 6, isActive: viewModel.isRunning)
+        .frame(width: timerSize, height: timerSize)
+      
       VStack(spacing: 8) {
         Text(viewModel.selectedActivity?.emoji ?? "🎯")
-          .font(.system(size: 52))
+          .font(.system(size: timerSize * 0.2))
           .opacity(viewModel.isRunning ? 1 : 0.6)
+        
         Text("\(viewModel.remainingSeconds)")
-          .font(.system(size: 64, weight: .ultraLight, design: .rounded))
+          .font(.system(size: timerSize * 0.25, weight: .ultraLight, design: .rounded))
           .monospacedDigit()
           .foregroundStyle(.primary)
           .contentTransition(.numericText())
           .animation(.spring(response: 0.3), value: viewModel.remainingSeconds)
+        
         Text("seconds")
           .font(.caption)
           .textCase(.uppercase)
           .tracking(2)
           .foregroundStyle(.secondary)
+          .opacity(viewModel.isRunning ? 0.6 : 1)
       }
     }
+    .scaleEffect(viewModel.isRunning ? 1.05 : 1)
+    .animation(.easeInOut(duration: 0.3), value: viewModel.isRunning)
   }
   
   private var statsRow: some View {
@@ -765,12 +967,13 @@ struct FocusTrackerView: View {
       Button { viewModel.showResetAlert = true } label: {
         Image(systemName: "arrow.counterclockwise")
           .font(.title3)
-          .foregroundStyle(.primary)
+          .foregroundStyle(viewModel.isRunning ? .primary : .secondary)
           .frame(width: 50, height: 50)
-          .background(FocusTheme.cardBackground)
+          .background(viewModel.isRunning ? FocusTheme.cardBackground : FocusTheme.cardBackground.opacity(0.5))
           .clipShape(Circle())
       }
       .buttonStyle(.plain)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.showResetAlert)
       
       Button { viewModel.toggle() } label: {
         Text(viewModel.isRunning ? "Pause" : "Start")
@@ -781,9 +984,10 @@ struct FocusTrackerView: View {
           .padding(.vertical, 18)
           .background(FocusTheme.warmBrown)
           .clipShape(Capsule())
+          .shadow(color: viewModel.isRunning ? FocusTheme.warmBrown.opacity(0.4) : .clear, radius: 12, y: 4)
       }
       .buttonStyle(.plain)
-      .sensoryFeedback(.impact(weight: .light), trigger: viewModel.isRunning)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.isRunning)
     }
     .padding(.bottom, 16)
   }
@@ -791,9 +995,6 @@ struct FocusTrackerView: View {
   private func physicsLayer(in geo: GeometryProxy) -> some View {
     PhysicsEmojisView(emojis: viewModel.physics.emojis)
       .allowsHitTesting(false)
-      .onChange(of: geo.size) { _, newSize in
-        viewModel.physics.configure(screenWidth: newSize.width, groundY: newSize.height - 20)
-      }
   }
   
   private var activityPickerSheet: some View {
@@ -865,6 +1066,7 @@ struct FocusTrackerView: View {
       }
       .disabled(viewModel.newActivityName.isEmpty)
       .padding(.horizontal)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.selectedActivity?.id)
       
       Spacer()
     }
@@ -906,12 +1108,23 @@ struct FocusTrackerView: View {
     return String(format: "%02d:%02d", m, s)
   }
   
-  private func onAppear(screenSize: CGSize) {
-    viewModel.physics.configure(screenWidth: screenSize.width, groundY: screenSize.height - 20)
+  private func onAppear(geo: GeometryProxy) {
+    updatePhysicsBounds(geo: geo)
     viewModel.initializeDefaultActivities(existing: activities, modelContext: modelContext)
     viewModel.loadTotalCollected(sessions: sessions)
     if viewModel.selectedActivity == nil, let first = activities.first {
       viewModel.selectedActivity = first
     }
+  }
+  
+  private func updatePhysicsBounds(geo: GeometryProxy) {
+    let inset: CGFloat = 20
+    let bounds = CGRect(
+      x: inset,
+      y: inset,
+      width: geo.size.width - inset * 2,
+      height: geo.size.height - inset * 2
+    )
+    viewModel.physics.configure(bounds: bounds)
   }
 }
