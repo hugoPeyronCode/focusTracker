@@ -142,13 +142,15 @@ final class FocusSession {
   var activityName: String
   var activityEmoji: String
   var collectedCount: Int
+  var durationSeconds: Int
   var date: Date
   
-  init(activityName: String, activityEmoji: String, collectedCount: Int) {
+  init(activityName: String, activityEmoji: String, collectedCount: Int, durationSeconds: Int = 30) {
     self.id = UUID()
     self.activityName = activityName
     self.activityEmoji = activityEmoji
     self.collectedCount = collectedCount
+    self.durationSeconds = durationSeconds
     self.date = Date()
   }
 }
@@ -428,6 +430,7 @@ final class FocusViewModel {
   var todayFocusSeconds: Int = 0
   var showActivityPicker = false
   var showSettings = false
+  var showStats = false
   var showResetAlert = false
   var isCreatingActivity = false
   var isEditingActivity = false
@@ -440,6 +443,7 @@ final class FocusViewModel {
   
   let physics = PhysicsEngine()
   let cycleDuration: Double = 30
+  let streakThreshold: Int = 600
   private var timer: Timer?
   private var tickCounter: Int = 0
   
@@ -447,6 +451,19 @@ final class FocusViewModel {
   var remainingSeconds: Int { Int(ceil(cycleDuration - elapsed)) }
   var pendingCount: Int { physics.emojis.count }
   var canCollect: Bool { pendingCount > 0 }
+  
+  var streakProgress: Double {
+    min(Double(todayFocusSeconds) / Double(streakThreshold), 1.0)
+  }
+  
+  var currentStreakLevel: Int {
+    todayFocusSeconds / streakThreshold
+  }
+  
+  var secondsToNextStreak: Int {
+    let remaining = streakThreshold - (todayFocusSeconds % streakThreshold)
+    return todayFocusSeconds >= streakThreshold && todayFocusSeconds % streakThreshold == 0 ? 0 : remaining
+  }
   
   func toggle() {
     isRunning ? pause() : start()
@@ -477,6 +494,7 @@ final class FocusViewModel {
     guard canCollect, let activity = selectedActivity else { return }
     isCollecting = true
     let count = physics.clear()
+    let duration = count * Int(cycleDuration)
     
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
       withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
@@ -485,7 +503,7 @@ final class FocusViewModel {
       self?.isCollecting = false
     }
     
-    let session = FocusSession(activityName: activity.name, activityEmoji: activity.emoji, collectedCount: count)
+    let session = FocusSession(activityName: activity.name, activityEmoji: activity.emoji, collectedCount: count, durationSeconds: duration)
     modelContext.insert(session)
   }
   
@@ -579,6 +597,12 @@ final class FocusViewModel {
   
   func loadTotalCollected(sessions: [FocusSession]) {
     totalCollected = sessions.reduce(0) { $0 + $1.collectedCount }
+    
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: Date())
+    todayFocusSeconds = sessions
+      .filter { calendar.isDate($0.date, inSameDayAs: today) }
+      .reduce(0) { $0 + $1.durationSeconds }
   }
   
   func initializeDefaultActivities(existing: [Activity], modelContext: ModelContext) {
@@ -668,6 +692,61 @@ struct CircularProgressView: View {
           .animation(.linear(duration: 0.1), value: progress)
       }
     }
+  }
+}
+
+struct StreakProgressBar: View {
+  let currentStreak: Int
+  let progress: Double
+  let secondsRemaining: Int
+  var settings = AppSettings.shared
+  
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "flame.fill")
+        .foregroundStyle(progress >= 1 ? settings.accent : .secondary)
+        .font(.system(size: 14))
+      
+      Text("\(currentStreak)")
+        .font(.system(size: 14, weight: .bold, design: settings.appFont.design))
+        .foregroundStyle(progress >= 1 ? settings.accent : .primary)
+        .contentTransition(.numericText())
+        .animation(.spring(response: 0.3), value: currentStreak)
+      
+      GeometryReader { geo in
+        ZStack(alignment: .leading) {
+          Capsule()
+            .fill(FocusTheme.subtle.opacity(0.3))
+          
+          Capsule()
+            .fill(settings.accent)
+            .frame(width: geo.size.width * progress)
+            .animation(.spring(response: 0.3), value: progress)
+        }
+      }
+      .frame(width: 60, height: 6)
+      
+      Text("\(currentStreak + 1)")
+        .font(.system(size: 14, weight: .medium, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+      
+      if secondsRemaining > 0 && progress < 1 {
+        Text(formatTimeShort(secondsRemaining))
+          .font(.system(size: 11, design: settings.appFont.design))
+          .foregroundStyle(.tertiary)
+          .monospacedDigit()
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .background(FocusTheme.cardBackground)
+    .clipShape(Capsule())
+  }
+  
+  private func formatTimeShort(_ seconds: Int) -> String {
+    let m = seconds / 60
+    let s = seconds % 60
+    return String(format: "%d:%02d", m, s)
   }
 }
 
@@ -905,6 +984,658 @@ struct SettingsView: View {
   }
 }
 
+// MARK: - Stats View
+
+struct DayStats: Identifiable {
+  let id = UUID()
+  let date: Date
+  let totalSeconds: Int
+  let sessions: [FocusSession]
+  let activityBreakdown: [(emoji: String, name: String, seconds: Int)]
+  let totalCoins: Int
+  
+  var hasStreak: Bool { totalSeconds >= 600 }
+  
+  var formattedTime: String {
+    let hours = totalSeconds / 3600
+    let minutes = (totalSeconds % 3600) / 60
+    let seconds = totalSeconds % 60
+    if hours > 0 {
+      return String(format: "%dh %dm %ds", hours, minutes, seconds)
+    } else if minutes > 0 {
+      return String(format: "%dm %ds", minutes, seconds)
+    }
+    return String(format: "%ds", seconds)
+  }
+}
+
+struct CoinData: Identifiable {
+  let id = UUID()
+  let emoji: String
+  let activityName: String
+  let date: Date
+}
+
+struct StatsView: View {
+  let sessions: [FocusSession]
+  @Environment(\.dismiss) var dismiss
+  @State private var selectedDate: Date = Date()
+  @State private var showStreakInfo = false
+  @State private var showBestStreakInfo = false
+  @State private var showCoinsView = false
+  var settings = AppSettings.shared
+  
+  private let calendar = Calendar.current
+  private let streakThreshold = 600
+  
+  var dayStats: [Date: DayStats] {
+    var stats: [Date: DayStats] = [:]
+    let grouped = Dictionary(grouping: sessions) { session in
+      calendar.startOfDay(for: session.date)
+    }
+    
+    for (date, daySessions) in grouped {
+      let totalSeconds = daySessions.reduce(0) { $0 + $1.durationSeconds }
+      let totalCoins = daySessions.reduce(0) { $0 + $1.collectedCount }
+      
+      var activityTotals: [String: (emoji: String, seconds: Int)] = [:]
+      for session in daySessions {
+        let existing = activityTotals[session.activityName] ?? (session.activityEmoji, 0)
+        activityTotals[session.activityName] = (session.activityEmoji, existing.seconds + session.durationSeconds)
+      }
+      
+      let breakdown = activityTotals.map { (emoji: $0.value.emoji, name: $0.key, seconds: $0.value.seconds) }
+        .sorted { $0.seconds > $1.seconds }
+      
+      stats[date] = DayStats(date: date, totalSeconds: totalSeconds, sessions: daySessions, activityBreakdown: breakdown, totalCoins: totalCoins)
+    }
+    
+    return stats
+  }
+  
+  var currentStreak: Int {
+    var streak = 0
+    var checkDate = calendar.startOfDay(for: Date())
+    
+    if let todayStats = dayStats[checkDate], todayStats.hasStreak {
+      streak = 1
+      checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate) ?? checkDate
+    } else {
+      checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate) ?? checkDate
+    }
+    
+    while let stats = dayStats[checkDate], stats.hasStreak {
+      streak += 1
+      checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate) ?? checkDate
+    }
+    
+    return streak
+  }
+  
+  var longestStreak: Int {
+    let sortedDates = dayStats.keys.sorted()
+    var longest = 0
+    var current = 0
+    var previousDate: Date?
+    
+    for date in sortedDates {
+      guard let stats = dayStats[date], stats.hasStreak else {
+        current = 0
+        previousDate = date
+        continue
+      }
+      
+      if let prev = previousDate,
+         let daysDiff = calendar.dateComponents([.day], from: prev, to: date).day,
+         daysDiff == 1 {
+        current += 1
+      } else {
+        current = 1
+      }
+      
+      longest = max(longest, current)
+      previousDate = date
+    }
+    
+    return longest
+  }
+  
+  var totalFocusTime: Int {
+    sessions.reduce(0) { $0 + $1.durationSeconds }
+  }
+  
+  var totalCoins: Int {
+    sessions.reduce(0) { $0 + $1.collectedCount }
+  }
+  
+  var allCoins: [CoinData] {
+    var coins: [CoinData] = []
+    for session in sessions {
+      for _ in 0..<session.collectedCount {
+        coins.append(CoinData(emoji: session.activityEmoji, activityName: session.activityName, date: session.date))
+      }
+    }
+    return coins.reversed()
+  }
+  
+  var last30Days: [Date] {
+    (0..<30).compactMap { offset in
+      calendar.date(byAdding: .day, value: -offset, to: calendar.startOfDay(for: Date()))
+    }
+  }
+  
+  var selectedDayStats: DayStats? {
+    dayStats[calendar.startOfDay(for: selectedDate)]
+  }
+  
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(spacing: 24) {
+          streakHeader
+          totalStatsRow
+          calendarStrip
+          selectedDayDetail
+        }
+        .padding()
+      }
+      .background(FocusTheme.beige)
+      .navigationTitle("Statistics")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Done") { dismiss() }
+        }
+      }
+      .sheet(isPresented: $showStreakInfo) { streakInfoSheet }
+      .sheet(isPresented: $showBestStreakInfo) { bestStreakInfoSheet }
+      .sheet(isPresented: $showCoinsView) { CoinsCollectionView(coins: allCoins) }
+    }
+  }
+  
+  private var streakHeader: some View {
+    HStack(spacing: 16) {
+      Button { showStreakInfo = true } label: {
+        streakCard(value: currentStreak, label: "Current Streak", icon: "flame.fill")
+      }
+      .buttonStyle(.plain)
+      
+      Button { showBestStreakInfo = true } label: {
+        streakCard(value: longestStreak, label: "Best Streak", icon: "trophy.fill")
+      }
+      .buttonStyle(.plain)
+    }
+  }
+  
+  private func streakCard(value: Int, label: String, icon: String) -> some View {
+    VStack(spacing: 8) {
+      HStack(spacing: 4) {
+        Image(systemName: icon)
+          .foregroundStyle(settings.accent)
+        Text("\(value)")
+          .font(.system(size: 28, weight: .bold, design: settings.appFont.design))
+          .contentTransition(.numericText())
+      }
+      Text(label)
+        .font(.system(size: 11, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+        .tracking(0.5)
+      
+      Image(systemName: "info.circle")
+        .font(.system(size: 10))
+        .foregroundStyle(.tertiary)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 16)
+    .background(FocusTheme.cardBackground)
+    .clipShape(RoundedRectangle(cornerRadius: 16))
+  }
+  
+  private var totalStatsRow: some View {
+    HStack(spacing: 12) {
+      VStack(spacing: 4) {
+        Text(formatTotalTime(totalFocusTime))
+          .font(.system(size: 18, weight: .semibold, design: settings.appFont.design))
+        Text("Total Time")
+          .font(.system(size: 10, design: settings.appFont.design))
+          .foregroundStyle(.secondary)
+          .textCase(.uppercase)
+      }
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 12)
+      .background(FocusTheme.cardBackground)
+      .clipShape(RoundedRectangle(cornerRadius: 12))
+      
+      Button { showCoinsView = true } label: {
+        VStack(spacing: 4) {
+          HStack(spacing: 4) {
+            Image(systemName: "circle.fill")
+              .font(.system(size: 10))
+              .foregroundStyle(settings.accent)
+            Text("\(totalCoins)")
+              .font(.system(size: 18, weight: .semibold, design: settings.appFont.design))
+          }
+          Text("Coins")
+            .font(.system(size: 10, design: settings.appFont.design))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(settings.accentSubtle)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(settings.accent, lineWidth: 1))
+      }
+      .buttonStyle(.plain)
+    }
+  }
+  
+  private func formatTotalTime(_ seconds: Int) -> String {
+    let hours = seconds / 3600
+    let minutes = (seconds % 3600) / 60
+    let secs = seconds % 60
+    if hours > 0 {
+      return String(format: "%dh %dm %ds", hours, minutes, secs)
+    } else if minutes > 0 {
+      return String(format: "%dm %ds", minutes, secs)
+    }
+    return String(format: "%ds", secs)
+  }
+  
+  private var calendarStrip: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Last 30 Days")
+        .font(.system(size: 13, weight: .semibold, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+        .tracking(0.5)
+      
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 8) {
+          ForEach(last30Days, id: \.self) { date in
+            dayCell(for: date)
+          }
+        }
+        .padding(.horizontal, 4)
+      }
+    }
+  }
+  
+  private func dayCell(for date: Date) -> some View {
+    let stats = dayStats[calendar.startOfDay(for: date)]
+    let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+    let isToday = calendar.isDateInToday(date)
+    let hasStreak = stats?.hasStreak ?? false
+    
+    return Button {
+      withAnimation(.spring(response: 0.3)) {
+        selectedDate = date
+      }
+    } label: {
+      VStack(spacing: 6) {
+        Text(dayOfWeek(date))
+          .font(.system(size: 10, design: settings.appFont.design))
+          .foregroundStyle(.secondary)
+        
+        ZStack {
+          Circle()
+            .fill(isSelected ? settings.accent : (hasStreak ? settings.accentSubtle : FocusTheme.cardBackground))
+            .frame(width: 40, height: 40)
+          
+          Text("\(calendar.component(.day, from: date))")
+            .font(.system(size: 14, weight: isSelected ? .bold : .medium, design: settings.appFont.design))
+            .foregroundStyle(isSelected ? .white : .primary)
+        }
+        
+        if hasStreak {
+          Image(systemName: "flame.fill")
+            .font(.system(size: 10))
+            .foregroundStyle(settings.accent)
+        } else {
+          Color.clear.frame(height: 10)
+        }
+        
+        if let stats = stats {
+          Text(stats.formattedTime)
+            .font(.system(size: 9, design: settings.appFont.design))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        } else {
+          Text("0s")
+            .font(.system(size: 9, design: settings.appFont.design))
+            .foregroundStyle(.tertiary)
+        }
+      }
+      .frame(width: 55)
+      .padding(.vertical, 8)
+      .background(isToday && !isSelected ? settings.accentSubtle.opacity(0.3) : Color.clear)
+      .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    .buttonStyle(.plain)
+  }
+  
+  private func dayOfWeek(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "EEE"
+    return formatter.string(from: date).uppercased()
+  }
+  
+  private var selectedDayDetail: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack {
+        Text(formattedSelectedDate)
+          .font(.system(size: 17, weight: .semibold, design: settings.appFont.design))
+        
+        Spacer()
+        
+        if let stats = selectedDayStats {
+          HStack(spacing: 4) {
+            if stats.hasStreak {
+              Image(systemName: "flame.fill")
+                .foregroundStyle(settings.accent)
+            }
+            Text(stats.formattedTime)
+              .font(.system(size: 15, weight: .medium, design: settings.appFont.design))
+              .foregroundStyle(settings.accent)
+          }
+        }
+      }
+      
+      if let stats = selectedDayStats {
+        HStack(spacing: 4) {
+          Image(systemName: "circle.fill")
+            .font(.system(size: 8))
+            .foregroundStyle(settings.accent)
+          Text("\(stats.totalCoins) coins collected")
+            .font(.system(size: 13, design: settings.appFont.design))
+            .foregroundStyle(.secondary)
+        }
+      }
+      
+      if let stats = selectedDayStats, !stats.activityBreakdown.isEmpty {
+        VStack(spacing: 12) {
+          ForEach(stats.activityBreakdown, id: \.name) { activity in
+            activityRow(emoji: activity.emoji, name: activity.name, seconds: activity.seconds, total: stats.totalSeconds)
+          }
+        }
+      } else {
+        VStack(spacing: 12) {
+          Image(systemName: "moon.zzz")
+            .font(.system(size: 32))
+            .foregroundStyle(.tertiary)
+          Text("No focus sessions")
+            .font(.system(size: 14, design: settings.appFont.design))
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+      }
+    }
+    .padding(16)
+    .background(FocusTheme.cardBackground)
+    .clipShape(RoundedRectangle(cornerRadius: 16))
+  }
+  
+  private func activityRow(emoji: String, name: String, seconds: Int, total: Int) -> some View {
+    let percentage = total > 0 ? Double(seconds) / Double(total) : 0
+    let minutes = seconds / 60
+    let secs = seconds % 60
+    
+    return VStack(spacing: 8) {
+      HStack {
+        Text(emoji)
+          .font(.title3)
+        Text(name)
+          .font(.system(size: 14, weight: .medium, design: settings.appFont.design))
+        Spacer()
+        Text(minutes > 0 ? "\(minutes)m \(secs)s" : "\(secs)s")
+          .font(.system(size: 14, design: settings.appFont.design))
+          .foregroundStyle(.secondary)
+      }
+      
+      GeometryReader { geo in
+        ZStack(alignment: .leading) {
+          RoundedRectangle(cornerRadius: 4)
+            .fill(FocusTheme.subtle.opacity(0.3))
+            .frame(height: 6)
+          
+          RoundedRectangle(cornerRadius: 4)
+            .fill(settings.accent)
+            .frame(width: geo.size.width * percentage, height: 6)
+        }
+      }
+      .frame(height: 6)
+    }
+  }
+  
+  private var formattedSelectedDate: String {
+    let formatter = DateFormatter()
+    if calendar.isDateInToday(selectedDate) {
+      return "Today"
+    } else if calendar.isDateInYesterday(selectedDate) {
+      return "Yesterday"
+    } else {
+      formatter.dateFormat = "EEEE, MMM d"
+      return formatter.string(from: selectedDate)
+    }
+  }
+  
+  private var streakInfoSheet: some View {
+    VStack(spacing: 20) {
+      Image(systemName: "flame.fill")
+        .font(.system(size: 48))
+        .foregroundStyle(settings.accent)
+      
+      Text("Current Streak")
+        .font(.system(size: 22, weight: .bold, design: settings.appFont.design))
+      
+      Text("Your current streak counts consecutive days where you've focused for at least 10 minutes (600 seconds).")
+        .font(.system(size: 15, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+      
+      VStack(alignment: .leading, spacing: 12) {
+        infoRow(icon: "checkmark.circle.fill", text: "Focus for 10+ minutes to count a day")
+        infoRow(icon: "arrow.right.circle.fill", text: "Days must be consecutive")
+        infoRow(icon: "xmark.circle.fill", text: "Missing a day resets the streak")
+      }
+      .padding()
+      .background(FocusTheme.cardBackground)
+      .clipShape(RoundedRectangle(cornerRadius: 12))
+      
+      Spacer()
+    }
+    .padding(24)
+    .presentationDetents([.medium])
+    .presentationDragIndicator(.visible)
+  }
+  
+  private var bestStreakInfoSheet: some View {
+    VStack(spacing: 20) {
+      Image(systemName: "trophy.fill")
+        .font(.system(size: 48))
+        .foregroundStyle(settings.accent)
+      
+      Text("Best Streak")
+        .font(.system(size: 22, weight: .bold, design: settings.appFont.design))
+      
+      Text("Your best streak is the longest consecutive run of days where you focused for at least 10 minutes each day.")
+        .font(.system(size: 15, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+      
+      VStack(alignment: .leading, spacing: 12) {
+        infoRow(icon: "star.fill", text: "Your personal record")
+        infoRow(icon: "chart.line.uptrend.xyaxis", text: "Keep going to beat it!")
+        infoRow(icon: "calendar", text: "Based on your history")
+      }
+      .padding()
+      .background(FocusTheme.cardBackground)
+      .clipShape(RoundedRectangle(cornerRadius: 12))
+      
+      Spacer()
+    }
+    .padding(24)
+    .presentationDetents([.medium])
+    .presentationDragIndicator(.visible)
+  }
+  
+  private func infoRow(icon: String, text: String) -> some View {
+    HStack(spacing: 12) {
+      Image(systemName: icon)
+        .foregroundStyle(settings.accent)
+        .frame(width: 24)
+      Text(text)
+        .font(.system(size: 14, design: settings.appFont.design))
+      Spacer()
+    }
+  }
+}
+
+// MARK: - Coins Collection View
+
+struct CoinsCollectionView: View {
+  let coins: [CoinData]
+  @Environment(\.dismiss) var dismiss
+  var settings = AppSettings.shared
+  
+  let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
+  
+  var coinsByActivity: [(emoji: String, name: String, count: Int)] {
+    var totals: [String: (emoji: String, count: Int)] = [:]
+    for coin in coins {
+      let existing = totals[coin.activityName] ?? (coin.emoji, 0)
+      totals[coin.activityName] = (coin.emoji, existing.count + 1)
+    }
+    return totals.map { (emoji: $0.value.emoji, name: $0.key, count: $0.value.count) }
+      .sorted { $0.count > $1.count }
+  }
+  
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(spacing: 24) {
+          totalHeader
+          
+          if !coinsByActivity.isEmpty {
+            breakdownSection
+          }
+          
+          if !coins.isEmpty {
+            allCoinsSection
+          } else {
+            emptyState
+          }
+        }
+        .padding()
+      }
+      .background(FocusTheme.beige)
+      .navigationTitle("Coins Collection")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Done") { dismiss() }
+        }
+      }
+    }
+  }
+  
+  private var totalHeader: some View {
+    VStack(spacing: 8) {
+      Text("\(coins.count)")
+        .font(.system(size: 48, weight: .bold, design: settings.appFont.design))
+        .foregroundStyle(settings.accent)
+      Text("Total Coins Collected")
+        .font(.system(size: 14, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+        .tracking(1)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 24)
+    .background(FocusTheme.cardBackground)
+    .clipShape(RoundedRectangle(cornerRadius: 16))
+  }
+  
+  private var breakdownSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("By Activity")
+        .font(.system(size: 13, weight: .semibold, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+        .tracking(0.5)
+      
+      VStack(spacing: 8) {
+        ForEach(coinsByActivity, id: \.name) { item in
+          HStack {
+            Text(item.emoji)
+              .font(.title3)
+            Text(item.name)
+              .font(.system(size: 14, design: settings.appFont.design))
+            Spacer()
+            Text("\(item.count)")
+              .font(.system(size: 14, weight: .semibold, design: settings.appFont.design))
+              .foregroundStyle(settings.accent)
+          }
+          .padding(.vertical, 8)
+          .padding(.horizontal, 12)
+          .background(FocusTheme.cardBackground)
+          .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+      }
+    }
+  }
+  
+  private var allCoinsSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("All Coins")
+        .font(.system(size: 13, weight: .semibold, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+        .tracking(0.5)
+      
+      LazyVGrid(columns: columns, spacing: 8) {
+        ForEach(coins) { coin in
+          coinCell(emoji: coin.emoji)
+        }
+      }
+      .padding(12)
+      .background(FocusTheme.cardBackground)
+      .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+  }
+  
+  private func coinCell(emoji: String) -> some View {
+    ZStack {
+      Circle()
+        .fill(FocusTheme.coinFill)
+        .frame(width: 44, height: 44)
+      Circle()
+        .stroke(settings.accent, lineWidth: 2)
+        .frame(width: 44, height: 44)
+      Text(emoji)
+        .font(.system(size: 20))
+    }
+  }
+  
+  private var emptyState: some View {
+    VStack(spacing: 12) {
+      Image(systemName: "circle.dashed")
+        .font(.system(size: 48))
+        .foregroundStyle(.tertiary)
+      Text("No coins yet")
+        .font(.system(size: 16, design: settings.appFont.design))
+        .foregroundStyle(.secondary)
+      Text("Complete focus sessions to collect coins!")
+        .font(.system(size: 14, design: settings.appFont.design))
+        .foregroundStyle(.tertiary)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 48)
+  }
+}
+
 // MARK: - Main View
 
 struct FocusTrackerView: View {
@@ -938,10 +1669,12 @@ struct FocusTrackerView: View {
     }
     .sheet(isPresented: $viewModel.showActivityPicker) { activityPickerSheet }
     .sheet(isPresented: $viewModel.showSettings) { SettingsView() }
+    .fullScreenCover(isPresented: $viewModel.showStats) { StatsView(sessions: sessions) }
     .alert("Reset Session?", isPresented: $viewModel.showResetAlert) { resetAlertButtons }
     .sensoryFeedback(.selection, trigger: viewModel.remainingSeconds, condition: { _, _ in settings.timerHapticsEnabled })
     .sensoryFeedback(.success, trigger: viewModel.cycleCompleted, condition: { _, _ in settings.timerHapticsEnabled })
     .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.totalCollected, condition: { _, _ in settings.hapticsEnabled })
+    .sensoryFeedback(.success, trigger: viewModel.currentStreakLevel, condition: { _, _ in settings.hapticsEnabled })
     .preferredColorScheme(settings.preferredColorScheme)
   }
   
@@ -1087,19 +1820,13 @@ struct FocusTrackerView: View {
   }
   
   private var topBar: some View {
-    HStack {
-      HStack(spacing: 4) {
-        Image(systemName: "clock")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        Text(formattedTodayTime)
-          .font(.system(size: 14, weight: .medium, design: settings.appFont.design))
-          .monospacedDigit()
-          .foregroundStyle(.secondary)
-          .contentTransition(.numericText())
-          .animation(.spring(response: 0.3), value: viewModel.todayFocusSeconds)
-      }
-      .opacity(viewModel.isRunning ? 0.5 : 1)
+    HStack(spacing: 8) {
+      StreakProgressBar(
+        currentStreak: viewModel.currentStreakLevel,
+        progress: viewModel.streakProgress,
+        secondsRemaining: viewModel.secondsToNextStreak
+      )
+      .opacity(viewModel.isRunning ? 0.7 : 1)
       
       Spacer()
       
@@ -1125,10 +1852,12 @@ struct FocusTrackerView: View {
     Button {
       if viewModel.canCollect {
         viewModel.collect(modelContext: modelContext)
+      } else {
+        viewModel.showStats = true
       }
     } label: {
       HStack(spacing: 6) {
-        Image(systemName: "sparkles")
+        Image(systemName: viewModel.canCollect ? "sparkles" : "chart.bar.fill")
           .foregroundStyle(settings.accent)
         Text("\(viewModel.totalCollected)")
           .fontWeight(.semibold)
@@ -1382,16 +2111,6 @@ struct FocusTrackerView: View {
   private var resetAlertButtons: some View {
     Button("Cancel", role: .cancel) { }
     Button("Reset", role: .destructive) { viewModel.reset() }
-  }
-  
-  private var formattedTodayTime: String {
-    let h = viewModel.todayFocusSeconds / 3600
-    let m = (viewModel.todayFocusSeconds % 3600) / 60
-    let s = viewModel.todayFocusSeconds % 60
-    if h > 0 {
-      return String(format: "%d:%02d:%02d", h, m, s)
-    }
-    return String(format: "%02d:%02d", m, s)
   }
   
   private func onAppear(geo: GeometryProxy) {
