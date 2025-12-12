@@ -6,14 +6,65 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		509947762EEC561900DC75DB /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 509947752EEC561900DC75DB /* WidgetKit.framework */; };
+		509947782EEC561900DC75DB /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 509947772EEC561900DC75DB /* SwiftUI.framework */; };
+		509947892EEC561A00DC75DB /* FocusTrackerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 509947732EEC561900DC75DB /* FocusTrackerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		509947872EEC561A00DC75DB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 509947542EEC2D1F00DC75DB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 509947722EEC561900DC75DB;
+			remoteInfo = FocusTrackerWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5099478E2EEC561A00DC75DB /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				509947892EEC561A00DC75DB /* FocusTrackerWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		5099475C2EEC2D1F00DC75DB /* focusTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = focusTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		509947732EEC561900DC75DB /* FocusTrackerWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FocusTrackerWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		509947752EEC561900DC75DB /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		509947772EEC561900DC75DB /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5099478A2EEC561A00DC75DB /* Exceptions for "FocusTrackerWidget" folder in "FocusTrackerWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 509947722EEC561900DC75DB /* FocusTrackerWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		5099475E2EEC2D1F00DC75DB /* focusTracker */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = focusTracker;
+			sourceTree = "<group>";
+		};
+		509947792EEC561900DC75DB /* FocusTrackerWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5099478A2EEC561A00DC75DB /* Exceptions for "FocusTrackerWidget" folder in "FocusTrackerWidgetExtension" target */,
+			);
+			path = FocusTrackerWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -26,6 +77,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		509947702EEC561900DC75DB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				509947782EEC561900DC75DB /* SwiftUI.framework in Frameworks */,
+				509947762EEC561900DC75DB /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -33,6 +93,8 @@
 			isa = PBXGroup;
 			children = (
 				5099475E2EEC2D1F00DC75DB /* focusTracker */,
+				509947792EEC561900DC75DB /* FocusTrackerWidget */,
+				509947742EEC561900DC75DB /* Frameworks */,
 				5099475D2EEC2D1F00DC75DB /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,8 +103,18 @@
 			isa = PBXGroup;
 			children = (
 				5099475C2EEC2D1F00DC75DB /* focusTracker.app */,
+				509947732EEC561900DC75DB /* FocusTrackerWidgetExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		509947742EEC561900DC75DB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				509947752EEC561900DC75DB /* WidgetKit.framework */,
+				509947772EEC561900DC75DB /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -55,10 +127,12 @@
 				509947582EEC2D1F00DC75DB /* Sources */,
 				509947592EEC2D1F00DC75DB /* Frameworks */,
 				5099475A2EEC2D1F00DC75DB /* Resources */,
+				5099478E2EEC561A00DC75DB /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				509947882EEC561A00DC75DB /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				5099475E2EEC2D1F00DC75DB /* focusTracker */,
@@ -69,6 +143,28 @@
 			productName = focusTracker;
 			productReference = 5099475C2EEC2D1F00DC75DB /* focusTracker.app */;
 			productType = "com.apple.product-type.application";
+		};
+		509947722EEC561900DC75DB /* FocusTrackerWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5099478B2EEC561A00DC75DB /* Build configuration list for PBXNativeTarget "FocusTrackerWidgetExtension" */;
+			buildPhases = (
+				5099476F2EEC561900DC75DB /* Sources */,
+				509947702EEC561900DC75DB /* Frameworks */,
+				509947712EEC561900DC75DB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				509947792EEC561900DC75DB /* FocusTrackerWidget */,
+			);
+			name = FocusTrackerWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = FocusTrackerWidgetExtension;
+			productReference = 509947732EEC561900DC75DB /* FocusTrackerWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -81,6 +177,9 @@
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
 					5099475B2EEC2D1F00DC75DB = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					509947722EEC561900DC75DB = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
 				};
@@ -100,12 +199,20 @@
 			projectRoot = "";
 			targets = (
 				5099475B2EEC2D1F00DC75DB /* focusTracker */,
+				509947722EEC561900DC75DB /* FocusTrackerWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		5099475A2EEC2D1F00DC75DB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		509947712EEC561900DC75DB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +229,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5099476F2EEC561900DC75DB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		509947882EEC561A00DC75DB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 509947722EEC561900DC75DB /* FocusTrackerWidgetExtension */;
+			targetProxy = 509947872EEC561A00DC75DB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		509947652EEC2D2100DC75DB /* Debug */ = {
@@ -256,6 +378,8 @@
 				DEVELOPMENT_TEAM = YA24P24868;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -288,6 +412,8 @@
 				DEVELOPMENT_TEAM = YA24P24868;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -303,6 +429,66 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		5099478C2EEC561A00DC75DB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YA24P24868;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FocusTrackerWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = FocusTrackerWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Cortex.focusTracker.FocusTrackerWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5099478D2EEC561A00DC75DB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YA24P24868;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FocusTrackerWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = FocusTrackerWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Cortex.focusTracker.FocusTrackerWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -327,6 +513,15 @@
 			buildConfigurations = (
 				509947682EEC2D2100DC75DB /* Debug */,
 				509947692EEC2D2100DC75DB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5099478B2EEC561A00DC75DB /* Build configuration list for PBXNativeTarget "FocusTrackerWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5099478C2EEC561A00DC75DB /* Debug */,
+				5099478D2EEC561A00DC75DB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

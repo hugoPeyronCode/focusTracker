@@ -9,6 +9,24 @@ import SwiftUI
 import SwiftData
 import UIKit
 import CoreMotion
+import ActivityKit
+
+// MARK: - Live Activity
+
+struct FocusActivityAttributes: ActivityAttributes {
+  public struct ContentState: Codable, Hashable {
+    var remainingSeconds: Int
+    var elapsed: Double
+    var cycleDuration: Double
+    var activityEmoji: String
+    var activityName: String
+    var todayFocusSeconds: Int
+    var currentStreakLevel: Int
+    var isRunning: Bool
+  }
+  
+  var startTime: Date
+}
 
 // MARK: - Settings
 
@@ -78,6 +96,9 @@ final class AppSettings {
   var timerHapticsEnabled: Bool {
     didSet { UserDefaults.standard.set(timerHapticsEnabled, forKey: "timerHapticsEnabled") }
   }
+  var fallingAnimationEnabled: Bool {
+    didSet { UserDefaults.standard.set(fallingAnimationEnabled, forKey: "fallingAnimationEnabled") }
+  }
   var colorScheme: AppColorScheme {
     didSet { UserDefaults.standard.set(colorScheme.rawValue, forKey: "colorScheme") }
   }
@@ -94,6 +115,7 @@ final class AppSettings {
   private init() {
     self.hapticsEnabled = UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true
     self.timerHapticsEnabled = UserDefaults.standard.object(forKey: "timerHapticsEnabled") as? Bool ?? true
+    self.fallingAnimationEnabled = UserDefaults.standard.object(forKey: "fallingAnimationEnabled") as? Bool ?? true
     self.colorScheme = AppColorScheme(rawValue: UserDefaults.standard.string(forKey: "colorScheme") ?? "") ?? .system
     self.accentColor = AccentColor(rawValue: UserDefaults.standard.string(forKey: "accentColor") ?? "") ?? .brown
     self.circleThickness = UserDefaults.standard.object(forKey: "circleThickness") as? Double ?? 6.0
@@ -120,7 +142,7 @@ final class AppSettings {
 // MARK: - Models
 
 @Model
-final class Activity {
+final class FocusActivityModel {
   var id: UUID
   var name: String
   var emoji: String
@@ -423,7 +445,7 @@ final class PhysicsEngine {
 
 @Observable
 final class FocusViewModel {
-  var selectedActivity: Activity?
+  var selectedActivity: FocusActivityModel?
   var isRunning = false
   var elapsed: Double = 0
   var totalCollected: Int = 0
@@ -434,22 +456,26 @@ final class FocusViewModel {
   var showResetAlert = false
   var isCreatingActivity = false
   var isEditingActivity = false
-  var editingActivity: Activity?
+  var editingActivity: FocusActivityModel?
   var newActivityName = ""
   var newActivityEmoji = "🎯"
   var isCollecting = false
   var lastRemainingSeconds: Int = 30
   var cycleCompleted = false
+  var pendingCoinsNoAnimation: Int = 0
   
   let physics = PhysicsEngine()
   let cycleDuration: Double = 30
   let streakThreshold: Int = 600
   private var timer: Timer?
   private var tickCounter: Int = 0
+  private var currentLiveActivity: ActivityKit.Activity<FocusActivityAttributes>?
   
   var progress: Double { elapsed / cycleDuration }
   var remainingSeconds: Int { Int(ceil(cycleDuration - elapsed)) }
-  var pendingCount: Int { physics.emojis.count }
+  var pendingCount: Int {
+    AppSettings.shared.fallingAnimationEnabled ? physics.emojis.count : pendingCoinsNoAnimation
+  }
   var canCollect: Bool { pendingCount > 0 }
   
   var streakProgress: Double {
@@ -475,12 +501,14 @@ final class FocusViewModel {
     timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
       self?.tick()
     }
+    startLiveActivity()
   }
   
   func pause() {
     isRunning = false
     timer?.invalidate()
     timer = nil
+    updateLiveActivity()
   }
   
   func reset() {
@@ -488,12 +516,89 @@ final class FocusViewModel {
     elapsed = 0
     tickCounter = 0
     physics.stop()
+    endLiveActivity()
+  }
+  
+  // MARK: - Live Activity
+  
+  private func startLiveActivity() {
+    guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+    
+    let attributes = FocusActivityAttributes(startTime: Date())
+    let state = FocusActivityAttributes.ContentState(
+      remainingSeconds: remainingSeconds,
+      elapsed: elapsed,
+      cycleDuration: cycleDuration,
+      activityEmoji: selectedActivity?.emoji ?? "🎯",
+      activityName: selectedActivity?.name ?? "Focus",
+      todayFocusSeconds: todayFocusSeconds,
+      currentStreakLevel: currentStreakLevel,
+      isRunning: isRunning
+    )
+    
+    do {
+      let activity = try ActivityKit.Activity.request(
+        attributes: attributes,
+        content: ActivityContent(state: state, staleDate: nil),
+        pushType: nil
+      )
+      currentLiveActivity = activity
+    } catch {
+      print("Failed to start Live Activity: \(error)")
+    }
+  }
+  
+  private func updateLiveActivity() {
+    guard let activity = currentLiveActivity else { return }
+    
+    let state = FocusActivityAttributes.ContentState(
+      remainingSeconds: remainingSeconds,
+      elapsed: elapsed,
+      cycleDuration: cycleDuration,
+      activityEmoji: selectedActivity?.emoji ?? "🎯",
+      activityName: selectedActivity?.name ?? "Focus",
+      todayFocusSeconds: todayFocusSeconds,
+      currentStreakLevel: currentStreakLevel,
+      isRunning: isRunning
+    )
+    
+    Task {
+      await activity.update(ActivityContent(state: state, staleDate: nil))
+    }
+  }
+  
+  private func endLiveActivity() {
+    guard let activity = currentLiveActivity else { return }
+    
+    let state = FocusActivityAttributes.ContentState(
+      remainingSeconds: remainingSeconds,
+      elapsed: elapsed,
+      cycleDuration: cycleDuration,
+      activityEmoji: selectedActivity?.emoji ?? "🎯",
+      activityName: selectedActivity?.name ?? "Focus",
+      todayFocusSeconds: todayFocusSeconds,
+      currentStreakLevel: currentStreakLevel,
+      isRunning: false
+    )
+    
+    Task {
+      await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .immediate)
+    }
+    currentLiveActivity = nil
   }
   
   func collect(modelContext: ModelContext) {
     guard canCollect, let activity = selectedActivity else { return }
     isCollecting = true
-    let count = physics.clear()
+    
+    let count: Int
+    if AppSettings.shared.fallingAnimationEnabled {
+      count = physics.clear()
+    } else {
+      count = pendingCoinsNoAnimation
+      pendingCoinsNoAnimation = 0
+    }
+    
     let duration = count * Int(cycleDuration)
     
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
@@ -514,6 +619,7 @@ final class FocusViewModel {
     if tickCounter >= 10 {
       tickCounter = 0
       todayFocusSeconds += 1
+      updateLiveActivity()
     }
     
     let newRemaining = remainingSeconds
@@ -524,8 +630,12 @@ final class FocusViewModel {
     if elapsed >= cycleDuration {
       elapsed = 0
       cycleCompleted = true
-      if let emoji = selectedActivity?.emoji {
-        physics.spawn(emoji: emoji)
+      if AppSettings.shared.fallingAnimationEnabled {
+        if let emoji = selectedActivity?.emoji {
+          physics.spawn(emoji: emoji)
+        }
+      } else {
+        pendingCoinsNoAnimation += 1
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
         self?.cycleCompleted = false
@@ -533,7 +643,7 @@ final class FocusViewModel {
     }
   }
   
-  func selectActivity(_ activity: Activity) {
+  func selectActivity(_ activity: FocusActivityModel) {
     selectedActivity = activity
     isCreatingActivity = false
     isEditingActivity = false
@@ -549,7 +659,7 @@ final class FocusViewModel {
     newActivityEmoji = "🎯"
   }
   
-  func startEditingActivity(_ activity: Activity) {
+  func startEditingActivity(_ activity: FocusActivityModel) {
     isEditingActivity = true
     isCreatingActivity = false
     editingActivity = activity
@@ -567,7 +677,7 @@ final class FocusViewModel {
   
   func addActivity(modelContext: ModelContext) {
     guard !newActivityName.isEmpty else { return }
-    let activity = Activity(name: newActivityName, emoji: newActivityEmoji, isCustom: true)
+    let activity = FocusActivityModel(name: newActivityName, emoji: newActivityEmoji, isCustom: true)
     modelContext.insert(activity)
     selectedActivity = activity
     isCreatingActivity = false
@@ -590,7 +700,7 @@ final class FocusViewModel {
     newActivityEmoji = "🎯"
   }
   
-  func deleteActivity(_ activity: Activity, modelContext: ModelContext) {
+  func deleteActivity(_ activity: FocusActivityModel, modelContext: ModelContext) {
     if selectedActivity?.id == activity.id { selectedActivity = nil }
     modelContext.delete(activity)
   }
@@ -605,7 +715,7 @@ final class FocusViewModel {
       .reduce(0) { $0 + $1.durationSeconds }
   }
   
-  func initializeDefaultActivities(existing: [Activity], modelContext: ModelContext) {
+  func initializeDefaultActivities(existing: [FocusActivityModel], modelContext: ModelContext) {
     guard existing.isEmpty else {
       selectedActivity = existing.first
       return
@@ -616,7 +726,7 @@ final class FocusViewModel {
       ("Create", "🎨"), ("Play", "🎮"), ("Social", "💬"), ("Rest", "😴")
     ]
     for (name, emoji) in defaults {
-      modelContext.insert(Activity(name: name, emoji: emoji, isCustom: false))
+      modelContext.insert(FocusActivityModel(name: name, emoji: emoji, isCustom: false))
     }
     try? modelContext.save()
   }
@@ -913,6 +1023,10 @@ struct SettingsView: View {
         Section("Haptics") {
           Toggle("Button Haptics", isOn: $settings.hapticsEnabled)
           Toggle("Timer Haptics", isOn: $settings.timerHapticsEnabled)
+        }
+        
+        Section("Animations") {
+          Toggle("Falling Coins Animation", isOn: $settings.fallingAnimationEnabled)
         }
         
         Section("Appearance") {
@@ -1641,7 +1755,7 @@ struct CoinsCollectionView: View {
 struct FocusTrackerView: View {
   @Environment(\.modelContext) private var modelContext
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-  @Query private var activities: [Activity]
+  @Query private var activities: [FocusActivityModel]
   @Query private var sessions: [FocusSession]
   @State private var viewModel = FocusViewModel()
   var settings = AppSettings.shared
@@ -1986,8 +2100,12 @@ struct FocusTrackerView: View {
   }
   
   private func physicsLayer(in geo: GeometryProxy) -> some View {
-    PhysicsEmojisView(emojis: viewModel.physics.emojis)
-      .allowsHitTesting(false)
+    Group {
+      if settings.fallingAnimationEnabled {
+        PhysicsEmojisView(emojis: viewModel.physics.emojis)
+          .allowsHitTesting(false)
+      }
+    }
   }
   
   private var activityPickerSheet: some View {
@@ -2133,3 +2251,4 @@ struct FocusTrackerView: View {
     viewModel.physics.configure(bounds: bounds)
   }
 }
+

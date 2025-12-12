@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import ActivityKit
 
 @main
 struct FocusTrackerApp: App {
@@ -14,6 +15,6 @@ struct FocusTrackerApp: App {
     WindowGroup {
       FocusTrackerView()
     }
-    .modelContainer(for: [Activity.self, FocusSession.self])
+    .modelContainer(for: [FocusActivityModel.self, FocusSession.self])
   }
 }

@@ -11,8 +11,6 @@ import SwiftUI
 @main
 struct FocusTrackerWidgetBundle: WidgetBundle {
     var body: some Widget {
-        FocusTrackerWidget()
-        FocusTrackerWidgetControl()
         FocusTrackerWidgetLiveActivity()
     }
 }
