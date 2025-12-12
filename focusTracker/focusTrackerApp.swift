@@ -10,10 +10,10 @@ import SwiftData
 
 @main
 struct FocusTrackerApp: App {
-    var body: some Scene {
-        WindowGroup {
-            FocusTrackerView()
-        }
-        .modelContainer(for: [Activity.self, FocusSession.self])
+  var body: some Scene {
+    WindowGroup {
+      FocusTrackerView()
     }
+    .modelContainer(for: [Activity.self, FocusSession.self])
+  }
 }

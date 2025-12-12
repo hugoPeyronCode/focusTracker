@@ -10,6 +10,115 @@ import SwiftData
 import UIKit
 import CoreMotion
 
+// MARK: - Settings
+
+enum AppColorScheme: String, CaseIterable {
+  case system = "System"
+  case light = "Light"
+  case dark = "Dark"
+}
+
+enum AccentColor: String, CaseIterable {
+  case brown = "Brown"
+  case blue = "Blue"
+  case purple = "Purple"
+  case green = "Green"
+  case orange = "Orange"
+  case pink = "Pink"
+  case red = "Red"
+  
+  var light: Color {
+    switch self {
+    case .brown: return Color(hex: "A18072")
+    case .blue: return Color(hex: "5B7DB1")
+    case .purple: return Color(hex: "8B7CB3")
+    case .green: return Color(hex: "6B9B7A")
+    case .orange: return Color(hex: "C4844A")
+    case .pink: return Color(hex: "B5708A")
+    case .red: return Color(hex: "B86B6B")
+    }
+  }
+  
+  var dark: Color {
+    switch self {
+    case .brown: return Color(hex: "D4A574")
+    case .blue: return Color(hex: "7BA3D4")
+    case .purple: return Color(hex: "B5A4D4")
+    case .green: return Color(hex: "8BC4A0")
+    case .orange: return Color(hex: "E4A46A")
+    case .pink: return Color(hex: "D490AA")
+    case .red: return Color(hex: "D88B8B")
+    }
+  }
+}
+
+enum AppFont: String, CaseIterable {
+  case rounded = "Rounded"
+  case mono = "Mono"
+  case serif = "Serif"
+  case sansSerif = "Sans Serif"
+  
+  var design: Font.Design {
+    switch self {
+    case .rounded: return .rounded
+    case .mono: return .monospaced
+    case .serif: return .serif
+    case .sansSerif: return .default
+    }
+  }
+}
+
+@Observable
+final class AppSettings {
+  static let shared = AppSettings()
+  
+  var hapticsEnabled: Bool {
+    didSet { UserDefaults.standard.set(hapticsEnabled, forKey: "hapticsEnabled") }
+  }
+  var timerHapticsEnabled: Bool {
+    didSet { UserDefaults.standard.set(timerHapticsEnabled, forKey: "timerHapticsEnabled") }
+  }
+  var colorScheme: AppColorScheme {
+    didSet { UserDefaults.standard.set(colorScheme.rawValue, forKey: "colorScheme") }
+  }
+  var accentColor: AccentColor {
+    didSet { UserDefaults.standard.set(accentColor.rawValue, forKey: "accentColor") }
+  }
+  var circleThickness: Double {
+    didSet { UserDefaults.standard.set(circleThickness, forKey: "circleThickness") }
+  }
+  var appFont: AppFont {
+    didSet { UserDefaults.standard.set(appFont.rawValue, forKey: "appFont") }
+  }
+  
+  private init() {
+    self.hapticsEnabled = UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true
+    self.timerHapticsEnabled = UserDefaults.standard.object(forKey: "timerHapticsEnabled") as? Bool ?? true
+    self.colorScheme = AppColorScheme(rawValue: UserDefaults.standard.string(forKey: "colorScheme") ?? "") ?? .system
+    self.accentColor = AccentColor(rawValue: UserDefaults.standard.string(forKey: "accentColor") ?? "") ?? .brown
+    self.circleThickness = UserDefaults.standard.object(forKey: "circleThickness") as? Double ?? 6.0
+    self.appFont = AppFont(rawValue: UserDefaults.standard.string(forKey: "appFont") ?? "") ?? .rounded
+  }
+  
+  var accent: Color {
+    Color(light: accentColor.light, dark: accentColor.dark)
+  }
+  
+  var accentSubtle: Color {
+    Color(light: accentColor.light.opacity(0.3), dark: accentColor.dark.opacity(0.3))
+  }
+  
+  var preferredColorScheme: ColorScheme? {
+    switch colorScheme {
+    case .system: return nil
+    case .light: return .light
+    case .dark: return .dark
+    }
+  }
+}
+
+// MARK: - Models
+
 @Model
 final class Activity {
   var id: UUID
@@ -44,14 +153,13 @@ final class FocusSession {
   }
 }
 
+// MARK: - Theme
+
 struct FocusTheme {
   static let beige = Color(light: Color(hex: "F5F0E8"), dark: Color(hex: "1C1917"))
-  static let warmBrown = Color(light: Color(hex: "A18072"), dark: Color(hex: "D4A574"))
-  static let accent = Color(light: Color(hex: "C4A484"), dark: Color(hex: "D4A574"))
   static let cardBackground = Color(light: Color(hex: "FFFFFF").opacity(0.7), dark: Color(hex: "292524").opacity(0.7))
   static let subtle = Color(light: Color(hex: "D4C4B5"), dark: Color(hex: "44403C"))
   static let coinFill = Color(light: Color(hex: "FAF7F2"), dark: Color(hex: "292524"))
-  static let coinStroke = Color(light: Color(hex: "A18072"), dark: Color(hex: "D4A574"))
 }
 
 extension Color {
@@ -73,6 +181,8 @@ extension Color {
     self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255)
   }
 }
+
+// MARK: - Physics
 
 struct PhysicsEmoji: Identifiable {
   let id = UUID()
@@ -307,6 +417,8 @@ final class PhysicsEngine {
   }
 }
 
+// MARK: - View Model
+
 @Observable
 final class FocusViewModel {
   var selectedActivity: Activity?
@@ -315,8 +427,11 @@ final class FocusViewModel {
   var totalCollected: Int = 0
   var todayFocusSeconds: Int = 0
   var showActivityPicker = false
+  var showSettings = false
   var showResetAlert = false
   var isCreatingActivity = false
+  var isEditingActivity = false
+  var editingActivity: Activity?
   var newActivityName = ""
   var newActivityEmoji = "🎯"
   var isCollecting = false
@@ -403,17 +518,31 @@ final class FocusViewModel {
   func selectActivity(_ activity: Activity) {
     selectedActivity = activity
     isCreatingActivity = false
+    isEditingActivity = false
+    editingActivity = nil
     showActivityPicker = false
   }
   
   func startCreatingActivity() {
     isCreatingActivity = true
+    isEditingActivity = false
+    editingActivity = nil
     newActivityName = ""
     newActivityEmoji = "🎯"
   }
   
+  func startEditingActivity(_ activity: Activity) {
+    isEditingActivity = true
+    isCreatingActivity = false
+    editingActivity = activity
+    newActivityName = activity.name
+    newActivityEmoji = activity.emoji
+  }
+  
   func cancelCreatingActivity() {
     isCreatingActivity = false
+    isEditingActivity = false
+    editingActivity = nil
     newActivityName = ""
     newActivityEmoji = "🎯"
   }
@@ -424,6 +553,20 @@ final class FocusViewModel {
     modelContext.insert(activity)
     selectedActivity = activity
     isCreatingActivity = false
+    isEditingActivity = false
+    editingActivity = nil
+    showActivityPicker = false
+    newActivityName = ""
+    newActivityEmoji = "🎯"
+  }
+  
+  func saveEditedActivity() {
+    guard !newActivityName.isEmpty, let activity = editingActivity else { return }
+    activity.name = newActivityName
+    activity.emoji = newActivityEmoji
+    isEditingActivity = false
+    isCreatingActivity = false
+    editingActivity = nil
     showActivityPicker = false
     newActivityName = ""
     newActivityEmoji = "🎯"
@@ -455,9 +598,12 @@ final class FocusViewModel {
   }
 }
 
+// MARK: - UI Components
+
 struct UIKitTextField: UIViewRepresentable {
   @Binding var text: String
   var placeholder: String
+  var onSubmit: (() -> Void)?
   
   func makeUIView(context: Context) -> UITextField {
     let textField = UITextField()
@@ -465,6 +611,7 @@ struct UIKitTextField: UIViewRepresentable {
     textField.font = .systemFont(ofSize: 17)
     textField.borderStyle = .none
     textField.autocorrectionType = .no
+    textField.returnKeyType = .done
     textField.delegate = context.coordinator
     textField.addTarget(context.coordinator, action: #selector(Coordinator.textChanged), for: .editingChanged)
     return textField
@@ -480,6 +627,12 @@ struct UIKitTextField: UIViewRepresentable {
     var parent: UIKitTextField
     init(_ parent: UIKitTextField) { self.parent = parent }
     @objc func textChanged(_ textField: UITextField) { parent.text = textField.text ?? "" }
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+      textField.resignFirstResponder()
+      parent.onSubmit?()
+      return true
+    }
   }
 }
 
@@ -487,6 +640,7 @@ struct CircularProgressView: View {
   let progress: Double
   let lineWidth: CGFloat
   let isActive: Bool
+  var settings = AppSettings.shared
   
   var body: some View {
     ZStack {
@@ -496,7 +650,7 @@ struct CircularProgressView: View {
       Circle()
         .trim(from: 0, to: progress)
         .stroke(
-          FocusTheme.warmBrown,
+          settings.accent,
           style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
         )
         .rotationEffect(.degrees(-90))
@@ -506,7 +660,7 @@ struct CircularProgressView: View {
         Circle()
           .trim(from: 0, to: progress)
           .stroke(
-            FocusTheme.warmBrown.opacity(0.4),
+            settings.accent.opacity(0.4),
             style: StrokeStyle(lineWidth: lineWidth + 8, lineCap: .round)
           )
           .rotationEffect(.degrees(-90))
@@ -523,6 +677,7 @@ struct StatCard: View {
   var isClickable: Bool = false
   var action: (() -> Void)? = nil
   @State private var tapped = false
+  var settings = AppSettings.shared
   
   var body: some View {
     Group {
@@ -532,7 +687,7 @@ struct StatCard: View {
           action()
         } label: { cardContent }
           .buttonStyle(.plain)
-          .sensoryFeedback(.impact(weight: .light), trigger: tapped)
+          .sensoryFeedback(.impact(weight: .light), trigger: tapped, condition: { _, _ in settings.hapticsEnabled })
       } else {
         cardContent
       }
@@ -542,24 +697,23 @@ struct StatCard: View {
   private var cardContent: some View {
     VStack(spacing: 4) {
       Text("\(value)")
-        .font(.title2)
-        .fontWeight(.semibold)
+        .font(.system(size: 22, weight: .semibold, design: settings.appFont.design))
         .foregroundStyle(.primary)
         .contentTransition(.numericText())
         .animation(.spring(response: 0.3), value: value)
       Text(label)
-        .font(.caption)
+        .font(.system(size: 10, design: settings.appFont.design))
         .textCase(.uppercase)
         .tracking(1)
         .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity)
     .padding(.vertical, 16)
-    .background(isClickable && value > 0 ? FocusTheme.accent.opacity(0.2) : FocusTheme.cardBackground)
+    .background(isClickable && value > 0 ? settings.accentSubtle : FocusTheme.cardBackground)
     .clipShape(RoundedRectangle(cornerRadius: 16))
     .overlay(
       RoundedRectangle(cornerRadius: 16)
-        .stroke(isClickable && value > 0 ? FocusTheme.warmBrown : Color.clear, lineWidth: 1.5)
+        .stroke(isClickable && value > 0 ? settings.accent : Color.clear, lineWidth: 1.5)
     )
   }
 }
@@ -570,6 +724,7 @@ struct ActivityButton: View {
   let isSelected: Bool
   let action: () -> Void
   @State private var tapped = false
+  var settings = AppSettings.shared
   
   var body: some View {
     Button {
@@ -578,22 +733,25 @@ struct ActivityButton: View {
     } label: {
       VStack(spacing: 8) {
         Text(emoji).font(.largeTitle)
-        Text(name).font(.caption).foregroundStyle(.primary)
+        Text(name)
+          .font(.system(size: 12, design: settings.appFont.design))
+          .foregroundStyle(.primary)
       }
       .frame(maxWidth: .infinity)
       .padding(.vertical, 16)
-      .background(isSelected ? FocusTheme.accent.opacity(0.3) : FocusTheme.cardBackground)
+      .background(isSelected ? settings.accentSubtle : FocusTheme.cardBackground)
       .clipShape(RoundedRectangle(cornerRadius: 16))
-      .overlay(RoundedRectangle(cornerRadius: 16).stroke(isSelected ? FocusTheme.warmBrown : Color.clear, lineWidth: 2))
+      .overlay(RoundedRectangle(cornerRadius: 16).stroke(isSelected ? settings.accent : Color.clear, lineWidth: 2))
     }
     .buttonStyle(.plain)
-    .sensoryFeedback(.impact(weight: .light), trigger: tapped)
+    .sensoryFeedback(.impact(weight: .light), trigger: tapped, condition: { _, _ in settings.hapticsEnabled })
   }
 }
 
 struct EmojiPickerView: View {
   @Binding var selected: String
   @State private var tapped = false
+  var settings = AppSettings.shared
   let emojis = ["🎯", "🧘", "💼", "💻", "💪", "⚽", "📚", "✍️", "🎵", "🎨",
                 "🏃", "🚴", "🏊", "🧗", "🎮", "🎬", "📷", "🔬", "🧪", "🌱",
                 "☕", "🍳", "🧹", "💤", "🙏", "💡", "🎓", "📝", "🗣️", "🤝",
@@ -610,19 +768,20 @@ struct EmojiPickerView: View {
           Text(emoji)
             .font(.title2)
             .frame(width: 44, height: 44)
-            .background(selected == emoji ? FocusTheme.accent.opacity(0.3) : Color.clear)
+            .background(selected == emoji ? settings.accentSubtle : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
       }
     }
-    .sensoryFeedback(.impact(weight: .light), trigger: tapped)
+    .sensoryFeedback(.impact(weight: .light), trigger: tapped, condition: { _, _ in settings.hapticsEnabled })
   }
 }
 
 struct PhysicsEmojisView: View {
   let emojis: [PhysicsEmoji]
   let coinSize: CGFloat = 48
+  var settings = AppSettings.shared
   
   @Environment(\.colorScheme) var colorScheme
   
@@ -631,7 +790,7 @@ struct PhysicsEmojisView: View {
   }
   
   var coinStroke: Color {
-    colorScheme == .dark ? Color(hex: "D4A574") : Color(hex: "A18072")
+    settings.accent
   }
   
   var body: some View {
@@ -663,12 +822,98 @@ struct PhysicsEmojisView: View {
   }
 }
 
+// MARK: - Settings View
+
+struct SettingsView: View {
+  @Bindable var settings = AppSettings.shared
+  @Environment(\.dismiss) var dismiss
+  
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Haptics") {
+          Toggle("Button Haptics", isOn: $settings.hapticsEnabled)
+          Toggle("Timer Haptics", isOn: $settings.timerHapticsEnabled)
+        }
+        
+        Section("Appearance") {
+          Picker("Theme", selection: $settings.colorScheme) {
+            ForEach(AppColorScheme.allCases, id: \.self) { scheme in
+              Text(scheme.rawValue).tag(scheme)
+            }
+          }
+          
+          Picker("Accent Color", selection: $settings.accentColor) {
+            ForEach(AccentColor.allCases, id: \.self) { color in
+              HStack {
+                Circle()
+                  .fill(color.light)
+                  .frame(width: 20, height: 20)
+                Text(color.rawValue)
+              }
+              .tag(color)
+            }
+          }
+        }
+        
+        Section("Timer") {
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Circle Thickness")
+              Spacer()
+              Text("\(Int(settings.circleThickness))")
+                .foregroundStyle(.secondary)
+            }
+            Slider(value: $settings.circleThickness, in: 2...16, step: 1)
+              .tint(settings.accent)
+          }
+          
+          HStack {
+            Text("Preview")
+            Spacer()
+            CircularProgressView(progress: 0.7, lineWidth: settings.circleThickness, isActive: false)
+              .frame(width: 50, height: 50)
+          }
+        }
+        
+        Section("Typography") {
+          Picker("Font Style", selection: $settings.appFont) {
+            ForEach(AppFont.allCases, id: \.self) { font in
+              Text(font.rawValue)
+                .font(.system(size: 16, design: font.design))
+                .tag(font)
+            }
+          }
+          
+          HStack {
+            Text("Preview")
+            Spacer()
+            Text("30")
+              .font(.system(size: 32, weight: .ultraLight, design: settings.appFont.design))
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+      .navigationTitle("Settings")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Done") { dismiss() }
+        }
+      }
+    }
+  }
+}
+
+// MARK: - Main View
+
 struct FocusTrackerView: View {
   @Environment(\.modelContext) private var modelContext
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Query private var activities: [Activity]
   @Query private var sessions: [FocusSession]
   @State private var viewModel = FocusViewModel()
+  var settings = AppSettings.shared
   
   var isLandscape: Bool {
     horizontalSizeClass == .regular || UIScreen.main.bounds.width > UIScreen.main.bounds.height
@@ -692,10 +937,12 @@ struct FocusTrackerView: View {
       }
     }
     .sheet(isPresented: $viewModel.showActivityPicker) { activityPickerSheet }
+    .sheet(isPresented: $viewModel.showSettings) { SettingsView() }
     .alert("Reset Session?", isPresented: $viewModel.showResetAlert) { resetAlertButtons }
-    .sensoryFeedback(.selection, trigger: viewModel.remainingSeconds)
-    .sensoryFeedback(.success, trigger: viewModel.cycleCompleted)
-    .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.totalCollected)
+    .sensoryFeedback(.selection, trigger: viewModel.remainingSeconds, condition: { _, _ in settings.timerHapticsEnabled })
+    .sensoryFeedback(.success, trigger: viewModel.cycleCompleted, condition: { _, _ in settings.timerHapticsEnabled })
+    .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.totalCollected, condition: { _, _ in settings.hapticsEnabled })
+    .preferredColorScheme(settings.preferredColorScheme)
   }
   
   private var background: some View {
@@ -781,31 +1028,30 @@ struct FocusTrackerView: View {
   private func compactStatCard(value: Int, label: String, isClickable: Bool = false, action: (() -> Void)? = nil) -> some View {
     let content = VStack(spacing: 2) {
       Text("\(value)")
-        .font(.title3)
-        .fontWeight(.semibold)
+        .font(.system(size: 18, weight: .semibold, design: settings.appFont.design))
         .foregroundStyle(.primary)
         .contentTransition(.numericText())
         .animation(.spring(response: 0.3), value: value)
       Text(label)
-        .font(.system(size: 8))
+        .font(.system(size: 8, design: settings.appFont.design))
         .textCase(.uppercase)
         .tracking(0.5)
         .foregroundStyle(.secondary)
     }
     .frame(width: 60)
     .padding(.vertical, 10)
-    .background(isClickable && value > 0 ? FocusTheme.accent.opacity(0.2) : FocusTheme.cardBackground)
+    .background(isClickable && value > 0 ? settings.accentSubtle : FocusTheme.cardBackground)
     .clipShape(RoundedRectangle(cornerRadius: 12))
     .overlay(
       RoundedRectangle(cornerRadius: 12)
-        .stroke(isClickable && value > 0 ? FocusTheme.warmBrown : Color.clear, lineWidth: 1.5)
+        .stroke(isClickable && value > 0 ? settings.accent : Color.clear, lineWidth: 1.5)
     )
     
     if isClickable, let action = action {
       return AnyView(
         Button(action: action) { content }
           .buttonStyle(.plain)
-          .sensoryFeedback(.impact(weight: .light), trigger: value)
+          .sensoryFeedback(.impact(weight: .light), trigger: value, condition: { _, _ in settings.hapticsEnabled })
       )
     } else {
       return AnyView(content)
@@ -823,19 +1069,19 @@ struct FocusTrackerView: View {
           .clipShape(Circle())
       }
       .buttonStyle(.plain)
-      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.showResetAlert)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.showResetAlert, condition: { _, _ in settings.hapticsEnabled })
       
       Button { viewModel.toggle() } label: {
         Image(systemName: viewModel.isRunning ? "pause.fill" : "play.fill")
           .font(.title3)
           .foregroundStyle(.white)
           .frame(width: 56, height: 56)
-          .background(FocusTheme.warmBrown)
+          .background(settings.accent)
           .clipShape(Circle())
-          .shadow(color: viewModel.isRunning ? FocusTheme.warmBrown.opacity(0.4) : .clear, radius: 8, y: 2)
+          .shadow(color: viewModel.isRunning ? settings.accent.opacity(0.4) : .clear, radius: 8, y: 2)
       }
       .buttonStyle(.plain)
-      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.isRunning)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.isRunning, condition: { _, _ in settings.hapticsEnabled })
     }
     .padding(.bottom, 8)
   }
@@ -847,8 +1093,7 @@ struct FocusTrackerView: View {
           .font(.caption)
           .foregroundStyle(.secondary)
         Text(formattedTodayTime)
-          .font(.subheadline)
-          .fontWeight(.medium)
+          .font(.system(size: 14, weight: .medium, design: settings.appFont.design))
           .monospacedDigit()
           .foregroundStyle(.secondary)
           .contentTransition(.numericText())
@@ -857,6 +1102,18 @@ struct FocusTrackerView: View {
       .opacity(viewModel.isRunning ? 0.5 : 1)
       
       Spacer()
+      
+      Button { viewModel.showSettings = true } label: {
+        Image(systemName: "gearshape")
+          .font(.body)
+          .foregroundStyle(.secondary)
+          .frame(width: 36, height: 36)
+          .background(FocusTheme.cardBackground)
+          .clipShape(Circle())
+      }
+      .buttonStyle(.plain)
+      .opacity(viewModel.isRunning ? 0.5 : 1)
+      .sensoryFeedback(.impact(weight: .light), trigger: viewModel.showSettings, condition: { _, _ in settings.hapticsEnabled })
       
       collectButton
         .opacity(viewModel.isRunning && !viewModel.canCollect ? 0.5 : 1)
@@ -872,36 +1129,38 @@ struct FocusTrackerView: View {
     } label: {
       HStack(spacing: 6) {
         Image(systemName: "sparkles")
-          .foregroundStyle(FocusTheme.warmBrown)
+          .foregroundStyle(settings.accent)
         Text("\(viewModel.totalCollected)")
           .fontWeight(.semibold)
           .contentTransition(.numericText())
           .animation(.spring(response: 0.3), value: viewModel.totalCollected)
         if viewModel.pendingCount > 0 {
           Text("+\(viewModel.pendingCount)")
-            .font(.caption)
-            .foregroundStyle(FocusTheme.warmBrown)
+            .font(.system(size: 12, design: settings.appFont.design))
+            .foregroundStyle(settings.accent)
             .contentTransition(.numericText())
             .animation(.spring(response: 0.3), value: viewModel.pendingCount)
         }
       }
-      .font(.subheadline)
+      .font(.system(size: 14, design: settings.appFont.design))
       .padding(.horizontal, 16)
       .padding(.vertical, 10)
-      .background(viewModel.canCollect ? FocusTheme.accent.opacity(0.3) : FocusTheme.cardBackground)
+      .background(viewModel.canCollect ? settings.accentSubtle : FocusTheme.cardBackground)
       .clipShape(Capsule())
-      .overlay(Capsule().stroke(viewModel.canCollect ? FocusTheme.warmBrown : Color.clear, lineWidth: 1.5))
+      .overlay(Capsule().stroke(viewModel.canCollect ? settings.accent : Color.clear, lineWidth: 1.5))
     }
     .buttonStyle(.plain)
     .animation(.spring(response: 0.3), value: viewModel.canCollect)
-    .sensoryFeedback(.impact(weight: .light), trigger: viewModel.totalCollected)
+    .sensoryFeedback(.impact(weight: .light), trigger: viewModel.totalCollected, condition: { _, _ in settings.hapticsEnabled })
   }
   
   private var activitySelector: some View {
     Button { viewModel.showActivityPicker = true } label: {
       HStack(spacing: 12) {
         Text(viewModel.selectedActivity?.emoji ?? "🎯").font(.title)
-        Text(viewModel.selectedActivity?.name ?? "Select").font(.headline).foregroundStyle(.primary)
+        Text(viewModel.selectedActivity?.name ?? "Select")
+          .font(.system(size: 17, weight: .semibold, design: settings.appFont.design))
+          .foregroundStyle(.primary)
         Image(systemName: "chevron.down").font(.caption).foregroundStyle(.secondary)
       }
       .padding(.horizontal, 24)
@@ -911,15 +1170,21 @@ struct FocusTrackerView: View {
     }
     .buttonStyle(.plain)
     .padding(.top, 8)
-    .sensoryFeedback(.impact(weight: .light), trigger: viewModel.showActivityPicker)
+    .sensoryFeedback(.impact(weight: .light), trigger: viewModel.showActivityPicker, condition: { _, _ in settings.hapticsEnabled })
   }
   
   private func timerSection(size: CGSize) -> some View {
+    let baseThickness = settings.circleThickness
+    let activeThickness = baseThickness + 2
     let timerSize: CGFloat = isLandscape ? min(size.height * 0.75, size.width * 0.5, 280) : min(size.width * 0.6, 240)
     
     return ZStack {
-      CircularProgressView(progress: viewModel.progress, lineWidth: viewModel.isRunning ? 8 : 6, isActive: viewModel.isRunning)
-        .frame(width: timerSize, height: timerSize)
+      CircularProgressView(
+        progress: viewModel.progress,
+        lineWidth: viewModel.isRunning ? activeThickness : baseThickness,
+        isActive: viewModel.isRunning
+      )
+      .frame(width: timerSize, height: timerSize)
       
       VStack(spacing: 8) {
         Text(viewModel.selectedActivity?.emoji ?? "🎯")
@@ -927,14 +1192,14 @@ struct FocusTrackerView: View {
           .opacity(viewModel.isRunning ? 1 : 0.6)
         
         Text("\(viewModel.remainingSeconds)")
-          .font(.system(size: timerSize * 0.25, weight: .ultraLight, design: .rounded))
+          .font(.system(size: timerSize * 0.25, weight: .ultraLight, design: settings.appFont.design))
           .monospacedDigit()
           .foregroundStyle(.primary)
           .contentTransition(.numericText())
           .animation(.spring(response: 0.3), value: viewModel.remainingSeconds)
         
         Text("seconds")
-          .font(.caption)
+          .font(.system(size: 10, design: settings.appFont.design))
           .textCase(.uppercase)
           .tracking(2)
           .foregroundStyle(.secondary)
@@ -973,21 +1238,20 @@ struct FocusTrackerView: View {
           .clipShape(Circle())
       }
       .buttonStyle(.plain)
-      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.showResetAlert)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.showResetAlert, condition: { _, _ in settings.hapticsEnabled })
       
       Button { viewModel.toggle() } label: {
         Text(viewModel.isRunning ? "Pause" : "Start")
-          .font(.headline)
-          .fontWeight(.semibold)
+          .font(.system(size: 17, weight: .semibold, design: settings.appFont.design))
           .foregroundStyle(.white)
           .frame(maxWidth: .infinity)
           .padding(.vertical, 18)
-          .background(FocusTheme.warmBrown)
+          .background(settings.accent)
           .clipShape(Capsule())
-          .shadow(color: viewModel.isRunning ? FocusTheme.warmBrown.opacity(0.4) : .clear, radius: 12, y: 4)
+          .shadow(color: viewModel.isRunning ? settings.accent.opacity(0.4) : .clear, radius: 12, y: 4)
       }
       .buttonStyle(.plain)
-      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.isRunning)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.isRunning, condition: { _, _ in settings.hapticsEnabled })
     }
     .padding(.bottom, 16)
   }
@@ -1000,14 +1264,14 @@ struct FocusTrackerView: View {
   private var activityPickerSheet: some View {
     NavigationStack {
       Group {
-        if viewModel.isCreatingActivity {
-          createActivityContent
+        if viewModel.isCreatingActivity || viewModel.isEditingActivity {
+          createOrEditActivityContent
         } else {
           activityListContent
         }
       }
       .background(FocusTheme.beige)
-      .navigationTitle(viewModel.isCreatingActivity ? "New Activity" : "Activities")
+      .navigationTitle(viewModel.isEditingActivity ? "Edit Activity" : (viewModel.isCreatingActivity ? "New Activity" : "Activities"))
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { pickerToolbar }
     }
@@ -1026,6 +1290,10 @@ struct FocusTrackerView: View {
             action: { viewModel.selectActivity(activity) }
           )
           .contextMenu {
+            Button {
+              viewModel.startEditingActivity(activity)
+            } label: { Label("Edit", systemImage: "pencil") }
+            
             if activity.isCustom {
               Button(role: .destructive) {
                 viewModel.deleteActivity(activity, modelContext: modelContext)
@@ -1038,8 +1306,10 @@ struct FocusTrackerView: View {
     }
   }
   
-  private var createActivityContent: some View {
-    VStack(spacing: 24) {
+  private var createOrEditActivityContent: some View {
+    let isEditing = viewModel.isEditingActivity
+    
+    return VStack(spacing: 24) {
       Text(viewModel.newActivityEmoji)
         .font(.system(size: 72))
         .padding(.top, 20)
@@ -1047,26 +1317,42 @@ struct FocusTrackerView: View {
       EmojiPickerView(selected: $viewModel.newActivityEmoji)
         .padding(.horizontal)
       
-      UIKitTextField(text: $viewModel.newActivityName, placeholder: "Activity name")
-        .padding()
-        .background(FocusTheme.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
+      UIKitTextField(
+        text: $viewModel.newActivityName,
+        placeholder: "Activity name",
+        onSubmit: {
+          if !viewModel.newActivityName.isEmpty {
+            if isEditing {
+              viewModel.saveEditedActivity()
+            } else {
+              viewModel.addActivity(modelContext: modelContext)
+            }
+          }
+        }
+      )
+      .padding()
+      .background(FocusTheme.cardBackground)
+      .clipShape(RoundedRectangle(cornerRadius: 12))
+      .padding(.horizontal)
       
       Button {
-        viewModel.addActivity(modelContext: modelContext)
+        if isEditing {
+          viewModel.saveEditedActivity()
+        } else {
+          viewModel.addActivity(modelContext: modelContext)
+        }
       } label: {
-        Text("Create Activity")
-          .font(.headline)
+        Text(isEditing ? "Save Changes" : "Create Activity")
+          .font(.system(size: 17, weight: .semibold, design: settings.appFont.design))
           .foregroundStyle(.white)
           .frame(maxWidth: .infinity)
           .padding(.vertical, 16)
-          .background(viewModel.newActivityName.isEmpty ? FocusTheme.subtle : FocusTheme.warmBrown)
+          .background(viewModel.newActivityName.isEmpty ? FocusTheme.subtle : settings.accent)
           .clipShape(Capsule())
       }
       .disabled(viewModel.newActivityName.isEmpty)
       .padding(.horizontal)
-      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.selectedActivity?.id)
+      .sensoryFeedback(.impact(weight: .medium), trigger: viewModel.selectedActivity?.id, condition: { _, _ in settings.hapticsEnabled })
       
       Spacer()
     }
@@ -1075,8 +1361,8 @@ struct FocusTrackerView: View {
   @ToolbarContentBuilder
   private var pickerToolbar: some ToolbarContent {
     ToolbarItem(placement: .topBarLeading) {
-      Button(viewModel.isCreatingActivity ? "Back" : "Close") {
-        if viewModel.isCreatingActivity {
+      Button((viewModel.isCreatingActivity || viewModel.isEditingActivity) ? "Back" : "Close") {
+        if viewModel.isCreatingActivity || viewModel.isEditingActivity {
           viewModel.cancelCreatingActivity()
         } else {
           viewModel.showActivityPicker = false
@@ -1084,7 +1370,7 @@ struct FocusTrackerView: View {
       }
     }
     ToolbarItem(placement: .topBarTrailing) {
-      if !viewModel.isCreatingActivity {
+      if !viewModel.isCreatingActivity && !viewModel.isEditingActivity {
         Button { viewModel.startCreatingActivity() } label: {
           Image(systemName: "plus")
         }
